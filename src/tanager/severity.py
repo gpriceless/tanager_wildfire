@@ -512,3 +512,109 @@ def compute_trajectories(
     stacked.attrs["n_scenes"] = len(fraction_datasets)
 
     return stacked
+
+
+# ---------------------------------------------------------------------------
+# Severity-method comparison
+# ---------------------------------------------------------------------------
+
+
+def compare_severity_methods(
+    mesma_severity: xr.DataArray,
+    dnbr_map: xr.DataArray,
+) -> dict[str, Any]:
+    """Compare a MESMA-derived severity map against a dNBR baseline.
+
+    Computes the standard agreement metrics between two co-registered
+    severity products on the pixels where both are finite. The two inputs
+    must already be on a common spatial grid; if grids differ, align with
+    :func:`tanager.io.reproject_to_common_grid` before calling.
+
+    Args:
+        mesma_severity: MESMA-derived severity DataArray (typically the
+            ``cbi_map`` returned by :func:`predict_severity`, or any
+            continuous burn-severity index sharing its spatial dims).
+        dnbr_map: dNBR (delta NBR) map for the same scene pair, e.g. the
+            output of :func:`tanager.spectral.dnbr`.
+
+    Returns:
+        Dict with keys:
+            ``correlation``: Pearson r over the jointly-finite pixels
+                (float, NaN if fewer than 2 finite pixels).
+            ``rmse``: Root mean squared error between MESMA and dNBR (float).
+            ``bias``: Mean of ``mesma_severity − dnbr_map`` (float).
+            ``difference_map``: Per-pixel ``mesma_severity − dnbr_map``
+                DataArray with the same dims/coords as the inputs (NaN
+                where either input was NaN).
+            ``n_valid``: Number of jointly-finite pixels used for the metrics.
+
+    Raises:
+        ValueError: If the two DataArrays do not share dimensionality. The
+            dim/coord-equality check uses ``.shape`` plus, when both arrays
+            have ``y`` and ``x`` coords, exact coord-array equality.
+    """
+    if mesma_severity.shape != dnbr_map.shape:
+        raise ValueError(
+            f"shape mismatch: mesma_severity={mesma_severity.shape} vs "
+            f"dnbr_map={dnbr_map.shape} — align with reproject_to_common_grid first"
+        )
+    for axis in ("y", "x"):
+        if axis in mesma_severity.coords and axis in dnbr_map.coords:
+            if not np.array_equal(
+                np.asarray(mesma_severity.coords[axis].values),
+                np.asarray(dnbr_map.coords[axis].values),
+            ):
+                raise ValueError(
+                    f"coordinate mismatch on '{axis}' axis — align with "
+                    "reproject_to_common_grid first"
+                )
+
+    a = np.asarray(mesma_severity.values, dtype=np.float64)
+    b = np.asarray(dnbr_map.values, dtype=np.float64)
+    finite = np.isfinite(a) & np.isfinite(b)
+    n_valid = int(finite.sum())
+
+    if n_valid < 2:
+        correlation = float("nan")
+        rmse = float("nan")
+        bias = float("nan")
+    else:
+        a_v = a[finite]
+        b_v = b[finite]
+        diff_v = a_v - b_v
+        bias = float(diff_v.mean())
+        rmse = float(np.sqrt(np.mean(diff_v**2)))
+        # np.corrcoef returns nan for constant inputs; guard explicitly.
+        if a_v.std() == 0.0 or b_v.std() == 0.0:
+            correlation = float("nan")
+        else:
+            correlation = float(np.corrcoef(a_v, b_v)[0, 1])
+
+    diff_full = a - b
+    diff_full[~finite] = np.nan
+    difference_map = xr.DataArray(
+        diff_full,
+        dims=mesma_severity.dims,
+        coords={k: mesma_severity.coords[k] for k in mesma_severity.dims if k in mesma_severity.coords},
+        name="severity_difference",
+        attrs={
+            "long_name": "mesma_severity_minus_dnbr",
+            "n_valid": n_valid,
+        },
+    )
+
+    logger.info(
+        "compare_severity_methods: n_valid=%d corr=%.4f rmse=%.4f bias=%+.4f",
+        n_valid,
+        correlation,
+        rmse,
+        bias,
+    )
+
+    return {
+        "correlation": correlation,
+        "rmse": rmse,
+        "bias": bias,
+        "difference_map": difference_map,
+        "n_valid": n_valid,
+    }
