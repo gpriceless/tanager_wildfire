@@ -354,3 +354,91 @@ class TestPlotting:
     def test_plot_rgb_composite_rejects_unknown_channel(self, fractions_ds):
         with pytest.raises(ValueError):
             plot_rgb_composite(fractions_ds, r="bogus")
+
+
+# ---------------------------------------------------------------------------
+# Wave 4 acceptance — pure-pixel coverage across all canonical classes
+# ---------------------------------------------------------------------------
+
+
+class TestPurePixelRecoveryAllClasses:
+    """Section 9 acceptance: pure-pixel fractions for every canonical class.
+
+    The Wave 2 suite verifies char/pv/npv/soil individually inside the NNLS
+    fallback test. These tests assert the same behaviour with explicit
+    threshold checks per class so a regression in any single endmember is
+    caught directly.
+    """
+
+    def test_all_four_classes_recovered_via_fallback(
+        self,
+        pure_pixel_scene,
+        small_library,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(unmixing, "_MESMA_AVAILABLE", False)
+        monkeypatch.setattr(unmixing, "_HYSUP_AVAILABLE", False)
+        result = run_mesma(pure_pixel_scene, small_library)
+
+        # Row 0 → char, Row 1 → pv, Row 2 → npv, Row 3 → soil.
+        # Columns 0..2 hold the pure-endmember pixels; column 3 is degenerate.
+        for col in (0, 1, 2):
+            assert float(result["char"].isel(y=0, x=col).values) > 0.8, f"char @x={col}"
+            assert float(result["pv"].isel(y=1, x=col).values) > 0.8, f"pv @x={col}"
+            assert float(result["npv"].isel(y=2, x=col).values) > 0.8, f"npv @x={col}"
+            assert float(result["soil"].isel(y=3, x=col).values) > 0.8, f"soil @x={col}"
+
+
+# ---------------------------------------------------------------------------
+# Wave 4 acceptance — constraint filtering edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestConstraintEdges:
+    def test_relaxed_constraints_accept_pure_pixels(
+        self,
+        pure_pixel_scene,
+        small_library,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(unmixing, "_MESMA_AVAILABLE", False)
+        monkeypatch.setattr(unmixing, "_HYSUP_AVAILABLE", False)
+        result = run_mesma(
+            pure_pixel_scene,
+            small_library,
+            constraints={"max_rmse": 1.0},
+        )
+        # With a permissive RMSE budget the pure-pixel cells must report a
+        # valid (non-NaN) RMSE.
+        assert not np.isnan(result["rmse"].isel(y=0, x=0).values)
+
+
+# ---------------------------------------------------------------------------
+# Wave 4 acceptance — shade normalization rounds to 1.0 across columns
+# ---------------------------------------------------------------------------
+
+
+class TestShadeNormalizationAcceptance:
+    def test_remaining_fractions_sum_to_one_across_grid(self):
+        # 3x3 fractions with varying shade per pixel.
+        char = np.array([[0.20, 0.30, 0.10]] * 3, dtype=np.float32)
+        pv = np.array([[0.30, 0.20, 0.40]] * 3, dtype=np.float32)
+        npv = np.array([[0.10, 0.10, 0.10]] * 3, dtype=np.float32)
+        soil = np.array([[0.10, 0.10, 0.10]] * 3, dtype=np.float32)
+        shade = np.array([[0.30, 0.30, 0.30]] * 3, dtype=np.float32)
+        rmse = np.zeros((3, 3), dtype=np.float32)
+
+        ds = xr.Dataset(
+            {
+                "char": (["y", "x"], char),
+                "pv": (["y", "x"], pv),
+                "npv": (["y", "x"], npv),
+                "soil": (["y", "x"], soil),
+                "shade": (["y", "x"], shade),
+                "rmse": (["y", "x"], rmse),
+            },
+            coords={"y": np.arange(3), "x": np.arange(3)},
+        )
+        out = normalize_fractions(ds, remove_shade=True)
+        total = sum(out[v].values for v in ("char", "pv", "npv", "soil"))
+        np.testing.assert_allclose(total, 1.0, atol=1e-5)

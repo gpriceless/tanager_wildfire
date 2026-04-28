@@ -57,6 +57,21 @@ _LAZY_EXPORTS: dict[str, str] = {
     "normalize_fractions": "unmixing",
     "plot_fraction_maps": "unmixing",
     "plot_rgb_composite": "unmixing",
+    # severity -------------------------------------------------------------
+    "train_severity_model": "severity",
+    "predict_severity": "severity",
+    "compute_trajectories": "severity",
+    "compare_severity_methods": "severity",
+    # lfmc -----------------------------------------------------------------
+    "compute_lfmc_indices": "lfmc",
+    "train_lfmc_plsr": "lfmc",
+    "predict_lfmc": "lfmc",
+    "load_globe_lfmc": "lfmc",
+    # validation -----------------------------------------------------------
+    "compute_accuracy": "validation",
+    "compare_sensors": "validation",
+    "load_aviris3_reference": "validation",
+    "load_barc_reference": "validation",
 }
 
 

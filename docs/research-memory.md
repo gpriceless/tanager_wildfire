@@ -217,7 +217,25 @@ After masking: **~330-346 usable bands** remain. Adaptive per-scene SNR filterin
 | FRAMES Burn Severity Library (SoCal) | Fire-specific field endmembers from chaparral | **Primary**: 7 char/ash, 36 GV (chamise, manzanita, ceanothus, sage, oak), 13 NPV, 10 soil. Old Fire + Simi Fire. | ASCII (350-2500nm) | 66 |
 | Globe-LFMC 2.0 | 287,551 field LFMC observations | Ground truth for LFMC training | Database | 287,551 |
 | spectral-libraries v1.1.3 | EAR/MASA/CoB endmember selection | Library pruning for MESMA | pip (Python) | N/A |
-| splib07-loader | Python loader for USGS v7 | Programmatic access to USGS spectra | pip (GitHub) | N/A |
+| splib07-loader | ~~Python loader for USGS v7~~ | ~~Programmatic access to USGS spectra~~ | ~~pip (GitHub)~~ | **INCOMPATIBLE — nptyping pins numpy<2.0. Use custom ASCII parser instead.** |
+
+### USGS v7 ASCII Data Access (Verified 2026-04-28)
+
+**Download:** [ScienceBase DOI:10.5066/F7RR1WDJ](https://dx.doi.org/10.5066/F7RR1WDJ) → child item "Spectra of materials in ASCII format"
+
+| Archive | Size | Contents | Recommended? |
+|---------|------|----------|--------------|
+| ASCIIdata_splib07a.zip | 20.8 MB | Measured spectra, native spectrometer resolution | **YES — primary** |
+| ASCIIdata_splib07b.zip | 41.4 MB | Oversampled (cubic spline to finer grid) | Optional |
+| ASCIIdata_splib07b_cvASD.zip | 27.1 MB | Convolved to ASD standard resolution | Alternative |
+
+**File format:** Single-column text files (.txt), one reflectance value per line per band. Wavelength/bandpass in separate files. Bad values = `-1.23e34` → mask as NaN.
+
+**Folder structure:** Chapter subfolders — `ChapterO_OrganicCompounds` (charcoal), `ChapterS_SoilsAndMixtures` (heated soils), `ChapterV_Vegetation` (chaparral), `ChapterM_Minerals` (goethite, hematite).
+
+**File prefix convention:** `s07ASD` = ASD spectrometer (350-2500nm, 2151 channels). This is the standard for VSWIR comparison.
+
+**Parser implementation:** ~30-50 lines Python with `numpy.loadtxt()`. No external dependency needed. SPy `BandResampler` handles 2151→426 channel convolution to Tanager bands.
 
 ### Fire Endmember Types (Recommended)
 
@@ -249,7 +267,7 @@ After masking: **~330-346 usable bands** remain. Adaptive per-scene SNR filterin
 | MESMA | 1.0.8 | Spectral unmixing | **USE** — confirmed compatible | Tested: Python 3.12 + numpy 2.4. API: `MesmaCore.execute()`. Image=(bands,pixels), Library=(bands,spectra). |
 | HySUPP | Current | 20+ unmixing algorithms | **FALLBACK** | Alternative if MESMA chokes on 426 bands |
 | spyndex | 0.6.0 | 232+ spectral indices | **USE** | Any numpy array input |
-| splib07-loader | Current | USGS Spectral Library v7 | **USE** | Third-party, small but functional |
+| splib07-loader | 0.5.1 | USGS Spectral Library v7 | **DO NOT USE** | Requires nptyping which pins numpy<2.0 — breaks rasterio/rioxarray. Correct repo: brianschubert/splib07-loader (NOT RobertSparworthy). Use custom ASCII parser instead. |
 | pystac | Current | STAC catalog traversal | **USE** | Static catalog -- use pystac, NOT pystac-client |
 | spectral-libraries | 1.1.3 | EAR/MASA/CoB endmember selection | **USE** | Same author as mesma. IES, CRES, MUSIC, AMUSES algorithms. |
 | pysptools | 0.15.0 | FCLS/NNLS unmixing, endmember extraction | **FALLBACK** | N-FINDR, PPI, FCLS. Unmaintained, Python 3.6 era. |
@@ -264,15 +282,19 @@ HyperCoast (HDF5 -> xarray) -> numpy bridge -> SPy / MESMA / spyndex
 
 ### Known Issues / Blockers
 
-| ID | Issue | Impact | Mitigation |
-|----|-------|--------|------------|
-| B0 | **Surface reflectance not confirmed for fire collection** | **Critical** | Verify by crawling STAC; if absent, evaluate ISOFIT self-application or radiance indices |
-| B1 | HyperCoast Basic products are ungridded | High | Use Ortho products only |
-| B2 | MESMA scalability at 426 bands untested | Medium | Test small subset; MNF reduction; HySUPP fallback |
-| B3 | Static STAC catalog (no /search endpoint) | Low | pystac traversal; cache locally |
-| B4 | SPy does not read HDF5 or xarray natively | Low | Extract .values from xarray to numpy |
-| B5 | GEE has only basic radiance (no L2) | Low | Direct HDF5 download is primary workflow |
-| B6 | USGS Spectral Library v7 no Python-native loader | Low | splib07-loader or numpy ASCII parsing |
+| ID | Issue | Impact | Mitigation | Status |
+|----|-------|--------|------------|--------|
+| B0 | ~~Surface reflectance not confirmed for fire collection~~ | ~~Critical~~ | ~~Verify by crawling STAC~~ | **RESOLVED — ortho_sr_hdf5 available for all 11 scenes** |
+| B1 | ~~HyperCoast Basic products are ungridded~~ | ~~High~~ | ~~Use Ortho products only~~ | **RESOLVED — ortho products confirmed working (direct h5py)** |
+| B2 | MESMA scalability at 426 bands untested | Medium | Test small subset; MNF reduction; HySUPP fallback | Open |
+| B3 | Static STAC catalog (no /search endpoint) | Low | pystac traversal; cache locally | Working |
+| B4 | SPy does not read HDF5 or xarray natively | Low | Extract .values from xarray to numpy | Working |
+| B5 | GEE has only basic radiance (no L2) | Low | Direct HDF5 download is primary workflow | N/A |
+| B6 | ~~USGS Spectral Library v7 no Python-native loader~~ | ~~Low~~ | ~~splib07-loader or numpy ASCII parsing~~ | **RESOLVED (2026-04-28) — splib07-loader incompatible (numpy<2); use custom ASCII parser on ASCIIdata_splib07a.zip (20.8 MB from ScienceBase DOI:10.5066/F7RR1WDJ). s07ASD prefix = ASD spectrometer, 2151 channels, 350-2500nm.** |
+| B7 | **HyperCoast read_tanager() fails on ortho products** | **Critical** | Direct h5py loader needed (prototype validated) | **NEW — LGT-296** |
+| B8 | **cloud_mask() wrong HDF5 paths for ortho** | **High** | Add GRIDS paths to candidate list | **NEW — LGT-297** |
+| B9 | **Spectral indices produce impossible values** | **High** | Clamp reflectance + epsilon guard | **NEW — LGT-298** |
+| B10 | **No spatial co-registration for multi-temporal** | **High** | rasterio reproject to common grid | **NEW — LGT-299** |
 
 ---
 
@@ -403,7 +425,62 @@ Three-tier approach (recommended: Tier 1 + Tier 2 for competition):
 
 | Date | Experiment | Result | Notes |
 |------|-----------|--------|-------|
-| (Phase 2 -- data pipeline) | | | |
+| 2026-04-27 | Real data download (3 ortho SR scenes) | **PASS** | catalog.py works; 3.4 GB downloaded |
+| 2026-04-27 | HyperCoast read_tanager() on ortho SR | **FAIL** | Requires lat/lon arrays; ortho uses UTM grid |
+| 2026-04-27 | Direct h5py loading of ortho SR | **PASS** | Full 426-band cube loaded successfully |
+| 2026-04-27 | Bad band masking on real data | **PASS** | 328/426 bands retained; sensor flags slightly differ |
+| 2026-04-27 | Spectral indices (NBR/NDVI/NDWI) on real data | **FAIL** | Values outside [-1,1] due to extreme reflectance |
+| 2026-04-27 | Cloud mask on real data | **FAIL** | Searches wrong HDF5 paths for ortho products |
+| 2026-04-27 | dNBR (pre vs post) | **FAIL** | Different spatial grids; scenes barely overlap |
+| 2026-04-27 | Scene geographic verification | **FAIL** | 3 "LA" scenes are actually in Utah |
+
+---
+
+## Real Data Findings (Phase 2 Defensibility Review)
+
+**Status:** Review complete (2026-04-27). Full report: `research/phase2-defensibility-review.md`
+**Verdict:** NOT DEFENSIBLE — 4 blocking issues must be resolved before Phase 3.
+
+### Confirmed Sensor Parameters (from real HDF5 metadata)
+
+| Parameter | Config Value | Actual Value | Status |
+|-----------|-------------|-------------|--------|
+| Bands | 426 | 426 | Correct |
+| Wavelength range | 380-2500 nm | 376.44-2499.00 nm | Slightly off |
+| Spectral sampling | 5 nm | 4.95-5.02 nm (mean 4.99) | Correct |
+| FWHM | 5.5 nm | 5.20-6.81 nm (varies by band) | Not constant |
+| GSD | 30 m | 30.0 m (confirmed from grid metadata) | Correct |
+| Projection | N/A | UTM Zone 11, EPSG:32611 | New finding |
+| Fill value | N/A | -9999.0 | New finding |
+
+### Corrected Scene Inventory (8 LA, 3 Utah)
+
+**LA area scenes (usable for FireSpec):**
+
+| Scene | Date | Phase | Grid | Notes |
+|-------|------|-------|------|-------|
+| 20241215_185916_33_4001 | 2024-12-15 | pre-fire | 713×791 | Malibu/Palisades coast |
+| 20250123_185507_64_4001 | 2025-01-23 | post-fire | 1047×961 | Eaton Fire area (north/east LA) |
+| 20250123_185518_92_4001 | 2025-01-23 | post-fire | TBD | Adjacent swath (likely overlaps pre-fire) |
+| 20250407_192235_24_4001 | 2025-04-07 | early-recovery | 869×1039 | North LA area |
+| 20250407_192229_16_4001 | 2025-04-07 | early-recovery | TBD | Adjacent swath |
+| 20250726_192343_21_4001 | 2025-07-26 | mid-recovery | TBD | LA area |
+| 20250726_192422_87_4001 | 2025-07-26 | mid-recovery | TBD | Adjacent swath |
+| 20250920_193207_61_4001 | 2025-09-20 | late-recovery | TBD | LA coast area |
+
+**Utah scenes (NOT LA fires):**
+
+| Scene | Date | Location |
+|-------|------|----------|
+| 20250724_190927_83_4001 | 2025-07-24 | Utah (38.5°N, -112°W) |
+| 20250902_190116_02_4001 | 2025-09-02 | Utah (38.5°N, -112°W) |
+| 20250902_190121_86_4001 | 2025-09-02 | Utah (38.5°N, -112°W) |
+
+### Key Resolved Questions
+
+- **B0 RESOLVED:** Surface reflectance IS available for all fire scenes (ortho_sr_hdf5 product type)
+- **Scene overlap CONCERN:** Pre-fire (Dec 15) and post-fire (Jan 23 primary) cover different areas. Must verify Jan 23 second swath overlaps pre-fire scene.
+- **Ortho products use GRIDS, not SWATHS:** All HDF5 paths in the pipeline need updating.
 
 ---
 

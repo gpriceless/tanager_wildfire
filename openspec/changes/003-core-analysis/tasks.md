@@ -428,7 +428,7 @@ Verify: unmixing module works end-to-end on synthetic data, fraction maps are ph
 <!-- execution_mode: sequential (within track) -->
 <!-- network: none for coding -->
 
-- [ ] Create `src/tanager/severity.py` with module docstring and logging
+- [x] Create `src/tanager/severity.py` with module docstring and logging
   <!-- files: src/tanager/severity.py (new) -->
   <!-- pattern: follow src/tanager/spectral.py module structure. Import scikit-learn at function level
        (heavy dep). Module docstring should reference Quintano et al. (2023) methodology. -->
@@ -437,7 +437,7 @@ Verify: unmixing module works end-to-end on synthetic data, fraction maps are ph
        validation.py. -->
   <!-- acceptance: module imports cleanly -->
 
-- [ ] Implement `train_severity_model(fractions, ground_truth_cbi, method="random_forest")` using scikit-learn RF; return model + metrics (R², RMSE from 5-fold CV)
+- [x] Implement `train_severity_model(fractions, ground_truth_cbi, method="random_forest")` using scikit-learn RF; return model + metrics (R², RMSE from 5-fold CV)
   <!-- files: src/tanager/severity.py (modify) -->
   <!-- pattern: `from sklearn.ensemble import RandomForestRegressor; from sklearn.model_selection import cross_val_score`
        Features: char, pv, npv, soil fractions (4 features per pixel).
@@ -453,7 +453,7 @@ Verify: unmixing module works end-to-end on synthetic data, fraction maps are ph
   <!-- test: tests/test_severity.py — train on synthetic fraction/CBI pairs, verify R² > 0 -->
   <!-- acceptance: returns trained model + R²/RMSE metrics; handles NaN input gracefully -->
 
-- [ ] Implement `predict_severity(fractions, model)` — apply trained model to produce continuous CBI map + classified severity map (5 classes using BARC thresholds)
+- [x] Implement `predict_severity(fractions, model)` — apply trained model to produce continuous CBI map + classified severity map (5 classes using BARC thresholds)
   <!-- files: src/tanager/severity.py (modify) -->
   <!-- pattern: flatten fractions to (n_pixels, 4), predict with model, reshape to (y, x).
        Classification thresholds per spec:
@@ -468,7 +468,7 @@ Verify: unmixing module works end-to-end on synthetic data, fraction maps are ph
   <!-- test: tests/test_severity.py — verify prediction range [0, 3]; classification boundaries correct -->
   <!-- acceptance: CBI values in [0, 3]; severity classes match BARC thresholds; NaN pixels preserved -->
 
-- [ ] Implement `compute_trajectories(scenes_dict, library)` — run MESMA on multiple dates, return time-series Dataset with dims (time, y, x)
+- [x] Implement `compute_trajectories(scenes_dict, library)` — run MESMA on multiple dates, return time-series Dataset with dims (time, y, x)
   <!-- files: src/tanager/severity.py (modify) -->
   <!-- pattern: scenes_dict = {datetime_str: xr.Dataset, ...}. For each scene, run unmixing
        (import run_mesma from tanager.unmixing), collect fraction Datasets.
@@ -486,7 +486,7 @@ Verify: unmixing module works end-to-end on synthetic data, fraction maps are ph
   <!-- test: tests/test_severity.py — test with 2 synthetic scenes, verify time dimension -->
   <!-- acceptance: output has time, y, x dims; fraction variables present; time coordinate is datetime -->
 
-- [ ] Implement `compare_severity_methods(mesma_severity, dnbr_map)` — correlation, RMSE, bias, difference map between MESMA-derived and dNBR-derived severity
+- [x] Implement `compare_severity_methods(mesma_severity, dnbr_map)` — correlation, RMSE, bias, difference map between MESMA-derived and dNBR-derived severity
   <!-- files: src/tanager/severity.py (modify) -->
   <!-- pattern: mesma_severity and dnbr_map are both DataArrays with (y, x) dims.
        Compute: Pearson correlation (np.corrcoef), RMSE, bias (mean difference), difference map.
@@ -502,7 +502,7 @@ Verify: unmixing module works end-to-end on synthetic data, fraction maps are ph
   <!-- test: tests/test_severity.py — test with synthetic data, verify metric ranges -->
   <!-- acceptance: returns correlation, RMSE, bias, difference map; metrics are physically reasonable -->
 
-- [ ] Verify: Train model on synthetic fraction/CBI pairs; predict produces values in [0, 3]; classification boundaries are correct
+- [x] Verify: Train model on synthetic fraction/CBI pairs; predict produces values in [0, 3]; classification boundaries are correct
   <!-- verify: use synthetic data from conftest.py + generated CBI values -->
   <!-- acceptance: all severity functions produce correct output ranges and types -->
 
@@ -510,7 +510,7 @@ Verify: unmixing module works end-to-end on synthetic data, fraction maps are ph
 <!-- execution_mode: sequential (within track) -->
 <!-- network: none for coding; Globe-LFMC loading may need downloaded data -->
 
-- [ ] Create `src/tanager/lfmc.py` with module docstring and logging
+- [x] Create `src/tanager/lfmc.py` with module docstring and logging
   <!-- files: src/tanager/lfmc.py (new) -->
   <!-- pattern: follow src/tanager/spectral.py module structure. Module docstring should reference
        Peterson & Roberts (2014) for PLSR approach and Quan et al. (2021) for SAI indices. -->
@@ -519,7 +519,7 @@ Verify: unmixing module works end-to-end on synthetic data, fraction maps are ph
        endmembers.py, or validation.py. -->
   <!-- acceptance: module imports cleanly -->
 
-- [ ] Implement `_compute_sai(reflectance, target_wl, left_shoulder, right_shoulder)` — core SAI computation for a single absorption feature
+- [x] Implement `_compute_sai(reflectance, target_wl, left_shoulder, right_shoulder)` — core SAI computation for a single absorption feature
   <!-- files: src/tanager/lfmc.py (modify) -->
   <!-- pattern: SAI (Spectral Absorption Index) per spec scenario:
        1. Identify absorption feature minimum near target_wl
@@ -536,7 +536,7 @@ Verify: unmixing module works end-to-end on synthetic data, fraction maps are ph
   <!-- test: tests/test_lfmc.py — test SAI on synthetic spectrum with known absorption feature -->
   <!-- acceptance: SAI in [0, 1]; returns 0.0 for flat spectrum; correct value for known absorption -->
 
-- [ ] Implement `compute_lfmc_indices(scene)` — compute all 8 water-sensitive indices (SAI970, SAI1200, SAI1660, NDWI_1240, NDWI_1640, NDWI_2130, WI, CR_depths); return xarray Dataset
+- [x] Implement `compute_lfmc_indices(scene)` — compute all 8 water-sensitive indices (SAI970, SAI1200, SAI1660, NDWI_1240, NDWI_1640, NDWI_2130, WI, CR_depths); return xarray Dataset
   <!-- files: src/tanager/lfmc.py (modify) -->
   <!-- pattern: output xr.Dataset with dims (y, x) and variables:
        SAI970, SAI1200, SAI1660 — computed via _compute_sai()
@@ -561,7 +561,7 @@ Verify: unmixing module works end-to-end on synthetic data, fraction maps are ph
   <!-- test: tests/test_lfmc.py — compute indices on synthetic dataset, verify shapes and ranges -->
   <!-- acceptance: 8 index variables in output; shapes match input spatial dims; NDWI in [-1, 1] -->
 
-- [ ] Implement `load_globe_lfmc(region_bbox, vegetation_types)` — load Globe-LFMC 2.0 observations; return GeoDataFrame with location, date, lfmc_percent, species
+- [x] Implement `load_globe_lfmc(region_bbox, vegetation_types)` — load Globe-LFMC 2.0 observations; return GeoDataFrame with location, date, lfmc_percent, species
   <!-- files: src/tanager/lfmc.py (modify) -->
   <!-- gotcha: Globe-LFMC 2.0 data format — likely CSV or Parquet. Download from DOI.
        The function should accept a local file path OR download URL.
@@ -579,7 +579,7 @@ Verify: unmixing module works end-to-end on synthetic data, fraction maps are ph
   <!-- test: tests/test_lfmc.py — test with mocked CSV data, verify output schema -->
   <!-- acceptance: returns GeoDataFrame with required columns; bbox filtering works; tanager_colocated flag set -->
 
-- [ ] Implement `train_lfmc_plsr(spectra, lfmc_values, n_components=10)` using scikit-learn PLSRegression; return model + R² + RMSE + VIP scores
+- [x] Implement `train_lfmc_plsr(spectra, lfmc_values, n_components=10)` using scikit-learn PLSRegression; return model + R² + RMSE + VIP scores
   <!-- files: src/tanager/lfmc.py (modify) -->
   <!-- pattern: `from sklearn.cross_decomposition import PLSRegression`
        Input spectra: 2D array (n_samples, n_bands) — full ~330-band reflectance (bad bands excluded).
@@ -596,7 +596,7 @@ Verify: unmixing module works end-to-end on synthetic data, fraction maps are ph
   <!-- test: tests/test_lfmc.py — train on synthetic spectra with moisture signal, R² > 0.5 -->
   <!-- acceptance: returns trained model + metrics; VIP scores highlight water absorption bands (970, 1200, 1660 nm) -->
 
-- [ ] Implement `predict_lfmc(scene, model, method)` — per-pixel LFMC estimate + uncertainty DataArray; flag pixels with LFMC < 60%
+- [x] Implement `predict_lfmc(scene, model, method)` — per-pixel LFMC estimate + uncertainty DataArray; flag pixels with LFMC < 60%
   <!-- files: src/tanager/lfmc.py (modify) -->
   <!-- pattern: flatten scene reflectance to (n_pixels, n_bands), predict with model.
        Reshape to (y, x) DataArray. Clip to physical range [0, 300] (LFMC can exceed 200% for
@@ -611,7 +611,7 @@ Verify: unmixing module works end-to-end on synthetic data, fraction maps are ph
   <!-- test: tests/test_lfmc.py — predict on synthetic data, verify output range and flag -->
   <!-- acceptance: LFMC values in [0, 300]; uncertainty DataArray present; low_lfmc flag at < 60% -->
 
-- [ ] Verify: Train PLSR on synthetic spectra with known moisture signal; R² > 0.5 on synthetic data; VIP scores highlight water absorption bands
+- [x] Verify: Train PLSR on synthetic spectra with known moisture signal; R² > 0.5 on synthetic data; VIP scores highlight water absorption bands
   <!-- verify: create synthetic spectra where reflectance at 970, 1200, 1660 nm correlates with LFMC value -->
   <!-- acceptance: R² > 0.5; VIP scores highest near water absorption bands -->
 
@@ -629,7 +629,7 @@ Verify: severity module produces classified maps with correct class boundaries; 
 <!-- execution_mode: sequential -->
 <!-- network: may need downloaded AVIRIS-3 and BARC data for verify steps -->
 
-- [ ] Create `src/tanager/validation.py` with module docstring
+- [x] Create `src/tanager/validation.py` with module docstring
   <!-- files: src/tanager/validation.py (new) -->
   <!-- pattern: follow src/tanager/spectral.py module structure. This is a pure computation module
        with data loading helpers. No side effects. -->
@@ -637,7 +637,7 @@ Verify: severity module produces classified maps with correct class boundaries; 
        top of the dependency tree). No other tanager module should import FROM validation.py. -->
   <!-- acceptance: module imports cleanly -->
 
-- [ ] Implement `load_aviris3_reference(filepath, target_resolution=30)` — load and spatially aggregate AVIRIS-3 fractions to 30m
+- [x] Implement `load_aviris3_reference(filepath, target_resolution=30)` — load and spatially aggregate AVIRIS-3 fractions to 30m
   <!-- files: src/tanager/validation.py (modify) -->
   <!-- gotcha: AVIRIS-3 native resolution is 3-4m. Aggregation to 30m means ~8x8 or ~10x10 pixel
        averaging. Use rasterio or xarray coarsen for spatial averaging.
@@ -652,7 +652,7 @@ Verify: severity module produces classified maps with correct class boundaries; 
   <!-- test: tests/test_validation.py — test with synthetic raster data, verify aggregation math -->
   <!-- acceptance: output resolution matches target; spatial alignment correct; variable names match MESMA output -->
 
-- [ ] Implement `load_barc_reference(filepath)` — load USGS BARC classified severity maps, align to Tanager grid
+- [x] Implement `load_barc_reference(filepath)` — load USGS BARC classified severity maps, align to Tanager grid
   <!-- files: src/tanager/validation.py (modify) -->
   <!-- gotcha: BARC maps are classified rasters (GeoTIFF) with integer severity codes.
        Load via rasterio. Reproject/align to Tanager grid. Output: xr.DataArray with integer codes
@@ -661,7 +661,7 @@ Verify: severity module produces classified maps with correct class boundaries; 
   <!-- test: tests/test_validation.py — test with synthetic classified raster -->
   <!-- acceptance: output is integer-coded DataArray aligned to Tanager grid -->
 
-- [ ] Implement `compute_accuracy(predicted, observed, metric_type)` — R², RMSE, MAE, bias for continuous; accuracy, Kappa, confusion matrix, F1 for classified
+- [x] Implement `compute_accuracy(predicted, observed, metric_type)` — R², RMSE, MAE, bias for continuous; accuracy, Kappa, confusion matrix, F1 for classified
   <!-- files: src/tanager/validation.py (modify) -->
   <!-- pattern: metric_type="continuous": compute R², RMSE, MAE, bias, Spearman correlation.
        metric_type="classified": compute overall accuracy, Cohen's Kappa, confusion matrix, per-class F1.
@@ -673,7 +673,7 @@ Verify: severity module produces classified maps with correct class boundaries; 
   <!-- test: tests/test_validation.py — test with known inputs (perfect prediction → R²=1.0, RMSE=0) -->
   <!-- acceptance: correct metrics for known inputs; NaN handling; both metric_type paths work -->
 
-- [ ] Implement `compare_sensors(tanager_result, reference_result, sensor_name)` — comparative metrics and improvement ratios for competition tie-breaker
+- [x] Implement `compare_sensors(tanager_result, reference_result, sensor_name)` — comparative metrics and improvement ratios for competition tie-breaker
   <!-- files: src/tanager/validation.py (modify) -->
   <!-- pattern: compute accuracy metrics for both Tanager and reference sensor results against
        the same ground truth. Compute improvement ratios: R²_improvement = tanager_R² - reference_R²,
@@ -685,7 +685,7 @@ Verify: severity module produces classified maps with correct class boundaries; 
   <!-- test: tests/test_validation.py — test with synthetic data, verify improvement ratio math -->
   <!-- acceptance: returns comparison dict with both metric sets + improvement ratios; table format correct -->
 
-- [ ] Verify: Accuracy metrics produce correct values on known inputs (perfect prediction gives R²=1.0, zero RMSE)
+- [x] Verify: Accuracy metrics produce correct values on known inputs (perfect prediction gives R²=1.0, zero RMSE)
   <!-- verify: unit test with exact known values -->
   <!-- acceptance: R²=1.0 for perfect prediction; RMSE=0; Kappa=1.0 for perfect classification -->
 
@@ -694,7 +694,7 @@ Verify: severity module produces classified maps with correct class boundaries; 
 <!-- dep: all 5 new modules must exist before writing tests that reference their functions -->
 <!-- network: none — all tests use synthetic data or mocked I/O -->
 
-- [ ] Create `tests/test_endmembers.py` — test library loading (with mocked file I/O), resampling dimensions, selection produces target library size, EAR/MASA pruning reduces count
+- [x] Create `tests/test_endmembers.py` — test library loading (with mocked file I/O), resampling dimensions, selection produces target library size, EAR/MASA pruning reduces count
   <!-- files: tests/test_endmembers.py (new) -->
   <!-- pattern: follow tests/test_catalog.py for mock patterns (unittest.mock.patch).
        Create synthetic library DataArrays with known spectra for testing.
@@ -707,8 +707,8 @@ Verify: severity module produces classified maps with correct class boundaries; 
        test data (synthetic library with known categories). -->
   <!-- acceptance: all loader, resampler, selector, and pruner functions tested; mocks used for I/O -->
 
-- [ ] Create `tests/test_unmixing.py` — test MESMA on synthetic pure pixels (expect fraction=1.0 for matching endmember), constraint filtering rejects bad fits, shade normalization sums to 1.0
-  <!-- files: tests/test_unmixing.py (new) -->
+- [ ] Expand `tests/test_unmixing.py` — test MESMA on synthetic pure pixels (expect fraction=1.0 for matching endmember), constraint filtering rejects bad fits, shade normalization sums to 1.0
+  <!-- files: tests/test_unmixing.py (modify — FILE ALREADY EXISTS with 19 tests from Wave 2 QA) -->
   <!-- pattern: use synthetic_tanager_dataset_with_signatures fixture. Create a small endmember
        library from the known signatures. Run unmixing. Verify fractions.
        Test constraint filtering: create a result with known bad RMSE, verify rejection.
@@ -718,7 +718,7 @@ Verify: severity module produces classified maps with correct class boundaries; 
        _MESMA_AVAILABLE flag. -->
   <!-- acceptance: pure-pixel fractions tested; constraint filtering tested; both backends covered -->
 
-- [ ] Create `tests/test_severity.py` — test RF training on synthetic data, prediction value ranges, classification thresholds, trajectory output shape
+- [x] Create `tests/test_severity.py` — test RF training on synthetic data, prediction value ranges, classification thresholds, trajectory output shape
   <!-- files: tests/test_severity.py (new) -->
   <!-- pattern: generate synthetic fractions + CBI values (CBI = 2.5 * char_fraction + noise).
        Train model, verify R² > 0 on training data.
@@ -726,7 +726,7 @@ Verify: severity module produces classified maps with correct class boundaries; 
        Trajectory: create 2-scene dict, verify output has time dimension. -->
   <!-- acceptance: training produces valid model; prediction ranges correct; classification tested -->
 
-- [ ] Create `tests/test_lfmc.py` — test SAI computation against known absorption features, PLSR on synthetic data, Globe-LFMC loader with mocked data
+- [x] Create `tests/test_lfmc.py` — test SAI computation against known absorption features, PLSR on synthetic data, Globe-LFMC loader with mocked data
   <!-- files: tests/test_lfmc.py (new) -->
   <!-- pattern: create synthetic spectrum with known absorption feature at 1200nm.
        Compute SAI, verify it's > 0 and in [0, 1].
@@ -737,7 +737,7 @@ Verify: severity module produces classified maps with correct class boundaries; 
        Add a clear relationship: LFMC = 200 - 500 * reflectance_at_1200nm + noise. -->
   <!-- acceptance: SAI tested against known features; PLSR R² reasonable; loader schema verified -->
 
-- [ ] Create `tests/test_validation.py` — test accuracy metrics against hand-calculated values, spatial aggregation preserves total, sensor comparison format
+- [x] Create `tests/test_validation.py` — test accuracy metrics against hand-calculated values, spatial aggregation preserves total, sensor comparison format
   <!-- files: tests/test_validation.py (new) -->
   <!-- pattern: test compute_accuracy with known inputs:
        perfect prediction → R²=1.0, RMSE=0, Kappa=1.0
@@ -745,7 +745,7 @@ Verify: severity module produces classified maps with correct class boundaries; 
        Test compare_sensors with two synthetic results, verify improvement ratio math. -->
   <!-- acceptance: metrics match hand-calculated values; both continuous and classified tested -->
 
-- [ ] Verify: `pytest tests/` passes with all new tests green; no regressions in Phase 2 tests
+- [x] Verify: `pytest tests/` passes with all new tests green; no regressions in Phase 2 tests
   <!-- verify: `pytest tests/ -v` -->
   <!-- acceptance: all tests pass; zero failures; zero errors -->
 
@@ -753,7 +753,7 @@ Verify: severity module produces classified maps with correct class boundaries; 
 <!-- execution_mode: sequential -->
 <!-- dep: all new modules and tests must exist -->
 
-- [ ] Update `src/tanager/__init__.py` to export new public API: endmembers (load_usgs_library, load_ecostress_library, load_frames_library, resample_library, build_fire_library), unmixing (run_mesma, select_bands_uszu, normalize_fractions), severity (train_severity_model, predict_severity, compute_trajectories), lfmc (compute_lfmc_indices, train_lfmc_plsr, predict_lfmc), validation (compute_accuracy, compare_sensors)
+- [x] Update `src/tanager/__init__.py` to export new public API: endmembers (load_usgs_library, load_ecostress_library, load_frames_library, resample_library, build_fire_library), unmixing (run_mesma, select_bands_uszu, normalize_fractions), severity (train_severity_model, predict_severity, compute_trajectories), lfmc (compute_lfmc_indices, train_lfmc_plsr, predict_lfmc), validation (compute_accuracy, compare_sensors)
   <!-- files: src/tanager/__init__.py (modify) -->
   <!-- pattern: add entries to _LAZY_EXPORTS dict following existing pattern:
        "load_usgs_library": "endmembers",
@@ -765,12 +765,12 @@ Verify: severity module produces classified maps with correct class boundaries; 
        The existing __getattr__ mechanism handles everything. Just add the name→module mapping. -->
   <!-- acceptance: `import tanager; tanager.run_mesma` resolves without error; all new public symbols accessible -->
 
-- [ ] Update `docs/engineering-memory.md` — add new modules to Module Registry, update Architecture Decisions with MESMA engine choice
+- [x] Update `docs/engineering-memory.md` — add new modules to Module Registry, update Architecture Decisions with MESMA engine choice
   <!-- files: docs/engineering-memory.md (modify) -->
   <!-- gotcha: EM handles this — do NOT delegate to coder. This task is for the EM pass. -->
   <!-- acceptance: Module Registry includes endmembers.py, unmixing.py, severity.py, lfmc.py, validation.py -->
 
-- [ ] Verify: `import tanager; tanager.run_mesma` resolves without error; all lazy imports work
+- [x] Verify: `import tanager; tanager.run_mesma` resolves without error; all lazy imports work
   <!-- verify: `python -c "import tanager; print(tanager.run_mesma)"` -->
   <!-- acceptance: all new public API symbols resolve via lazy import -->
 

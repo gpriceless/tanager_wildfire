@@ -4,8 +4,8 @@
 
 **Location:** `/docs/engineering-memory.md`
 **Owner:** Engineering Manager (Crenshaw)
-**Updated:** 2026-04-27
-**Version:** 3.0 (003-core-analysis enrichment)
+**Updated:** 2026-04-28
+**Version:** 3.3 (Phase 3 — Wave 4 Validation & Integration in progress; validation module + 5 test files merged)
 
 ---
 
@@ -23,7 +23,7 @@ This document is the Engineering Manager's working memory. It tracks:
 
 ## Architecture Overview
 
-### Status: Phase 3 — Core Analysis (003-core-analysis) — ENRICHED, AWAITING BUILD
+### Status: Phase 3 — Core Analysis (003-core-analysis) — Wave 4 in progress (validation.py landed, full pytest 331/332 green)
 
 Python package at `src/tanager/`, editable install via `pip install -e .`.
 
@@ -190,7 +190,7 @@ tests/
 | TD-2 | HyperCoast wavelength_range: must load-then-slice (no native wavelength filter) | Low | Documented in io.py gotcha |
 | TD-3 | cloud_mask may require direct h5py access (HyperCoast may not expose beta_cirrus_mask) | Medium | h5py added as dependency; fallback documented |
 | TD-4 | In-CoB selection is simplified (spectral variability ranking) until MESMA exists | Low | Full In-CoB requires unmixing loop; deferred to post-Wave 2 refinement |
-| TD-5 | mesma v1.0.8 may not be numpy 2.x compatible | High | Gating check in Wave 1 Section 1; HySUPP fallback ready |
+| TD-5 | ~~mesma v1.0.8 may not be numpy 2.x compatible~~ | ~~High~~ | **RESOLVED (2026-04-28) — mesma 1.0.8 verified on Python 3.12.3 / numpy 2.4.4. API: MesmaCore.execute(). Stays as optional dep, primary engine.** |
 | TD-6 | FRAMES SoCal library bulk download mechanism unverified | Medium | Manual download acceptable for competition; loader handles local dir |
 
 ---
@@ -203,3 +203,11 @@ tests/
 | 2026-04-27 | 002-data-pipeline tasks.md enriched (EM audit) | **DONE** |
 | 2026-04-27 | 002-data-pipeline built and merged to main | **DONE** |
 | 2026-04-27 | 003-core-analysis tasks.md enriched (EM audit) | **DONE** |
+| 2026-04-28 | Phase 2 remediation: 5/6 bugs resolved, LGT-298 closed, LGT-299 awaiting last QA | **IN PROGRESS** |
+| 2026-04-28 | Phase 3 (003-core-analysis) EM validation: READY, no blockers | **DONE** |
+| 2026-04-28 | Phase 2 findings integrated into Phase 3 tasks.md (epsilon guard, FWHM, reflectance clamp) | **DONE** |
+| 2026-04-28 | Phase 3 Wave 1 Section 1 complete: deps added, mesma verified (PASS), spectral-libraries verified (PASS, corrected import path), splib07-loader incompatible (custom ASCII parser needed) | **DONE** |
+| 2026-04-28 | tasks.md mid-execution enrichment: splib07-loader gotcha, mesma API details from QA, spectral-libraries import path correction, shade shape (bands,1) | **DONE** |
+| 2026-04-28 | Wave 4 validation module landed: validation.py (load_aviris3_reference, load_barc_reference, compute_accuracy, compare_sensors). Continuous metrics (R²/RMSE/MAE/bias/Spearman) and classified metrics (accuracy/Cohen κ/F1/confusion) with NaN/nodata pairwise masking. compare_sensors emits an improvement_ratios dict + pandas comparison_table for the +5 EMIT/PRISMA tie-breaker. | **DONE** |
+| 2026-04-28 | Wave 4 test suite landed: tests/test_endmembers.py (25), tests/test_unmixing.py expanded (+3 → 22), tests/test_severity.py (12), tests/test_lfmc.py (16), tests/test_validation.py (19). Full pytest tests/ → 331 passed, 1 skipped (spectral_libraries optional dep). | **DONE** |
+| 2026-04-28 | Public API expanded with 12 new lazy exports across severity / lfmc / validation; `import tanager; tanager.<symbol>` resolves for every Wave 1–4 public function. | **DONE** |
