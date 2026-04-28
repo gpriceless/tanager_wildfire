@@ -14,6 +14,12 @@ load_ortho_scene(filepath, wavelength_range=None) -> xarray.Dataset
 get_spatial_info(dataset) -> dict
     Extract CRS, bounds, resolution, and shape from a loaded Dataset.
 
+reproject_to_common_grid(datasets, target_bounds=None, target_resolution=30.0,
+                         min_overlap_fraction=0.10, resampling="nearest")
+    Reproject a set of Tanager scenes onto a single shared grid so that
+    multi-temporal operations (dNBR, change detection, trajectories) can
+    subtract / index aligned arrays.
+
 Notes
 -----
 Loading a wavelength subset (``wavelength_range``) on swath products reads
@@ -516,3 +522,308 @@ def get_spatial_info(dataset: xr.Dataset) -> dict:
         "resolution": resolution,
         "shape": shape,
     }
+
+
+# ---------------------------------------------------------------------------
+# Multi-temporal alignment
+# ---------------------------------------------------------------------------
+
+# Tanager-1 ortho_sr products land on a 30 m UTM grid. We default to that so
+# resampling onto the common grid is a near no-op when the target CRS already
+# matches the source CRS.
+_DEFAULT_TARGET_RESOLUTION_M = 30.0
+
+# Below this fractional overlap we refuse to reproject — the resulting common
+# grid would contain mostly NaN and dNBR-style operations would be meaningless.
+_DEFAULT_MIN_OVERLAP_FRACTION = 0.10
+
+
+def _resampling_from_str(name: str):
+    """Translate a resampling-method string to a ``rasterio.enums.Resampling`` value.
+
+    A small allow-list mirrors the methods that make sense for reflectance:
+    nearest preserves pixel values exactly (recommended), bilinear / cubic are
+    available for callers that explicitly want continuous interpolation.
+    """
+    from rasterio.enums import Resampling
+
+    table = {
+        "nearest": Resampling.nearest,
+        "bilinear": Resampling.bilinear,
+        "cubic": Resampling.cubic,
+    }
+    if name not in table:
+        raise ValueError(
+            f"Unsupported resampling method {name!r}; expected one of {sorted(table)}"
+        )
+    return table[name]
+
+
+def _intersect_bounds(
+    bounds_list: list[tuple[float, float, float, float]],
+) -> tuple[float, float, float, float]:
+    """Return the geometric intersection (xmin, ymin, xmax, ymax) of N rectangles.
+
+    If the rectangles do not overlap, the returned ``(xmin, ymin, xmax, ymax)``
+    has ``xmin >= xmax`` or ``ymin >= ymax`` (zero/negative width or height);
+    callers must check.
+    """
+    xmin = max(b[0] for b in bounds_list)
+    ymin = max(b[1] for b in bounds_list)
+    xmax = min(b[2] for b in bounds_list)
+    ymax = min(b[3] for b in bounds_list)
+    return xmin, ymin, xmax, ymax
+
+
+def _bounds_area(bounds: tuple[float, float, float, float]) -> float:
+    """Area of an (xmin, ymin, xmax, ymax) rectangle, clamped to >= 0."""
+    xmin, ymin, xmax, ymax = bounds
+    return max(0.0, xmax - xmin) * max(0.0, ymax - ymin)
+
+
+def _pixel_edge_extent(info: dict) -> tuple[float, float, float, float]:
+    """Convert pixel-centre bounds (from ``get_spatial_info``) to pixel-edge bounds.
+
+    ``get_spatial_info`` reports ``bounds`` using the min/max of the pixel-centre
+    coordinate arrays. For overlap/intersection logic we want the actual
+    rectangular extent of the raster, which extends a half-pixel beyond the
+    centres at every edge. When no resolution is available (curvilinear or
+    single-pixel datasets) the centre bounds are returned unchanged.
+    """
+    xmin, ymin, xmax, ymax = info["bounds"]
+    res = info["resolution"]
+    if res is None:
+        return (xmin, ymin, xmax, ymax)
+    x_res, y_res = res
+    return (
+        xmin - x_res / 2.0,
+        ymin - y_res / 2.0,
+        xmax + x_res / 2.0,
+        ymax + y_res / 2.0,
+    )
+
+
+def reproject_to_common_grid(
+    datasets: list[xr.Dataset],
+    target_bounds: Optional[tuple[float, float, float, float]] = None,
+    target_resolution: float = _DEFAULT_TARGET_RESOLUTION_M,
+    min_overlap_fraction: float = _DEFAULT_MIN_OVERLAP_FRACTION,
+    resampling: str = "nearest",
+) -> list[xr.Dataset]:
+    """Reproject Tanager scenes onto a single shared grid.
+
+    The Tanager-1 ortho_sr products have per-acquisition grids of differing
+    extent, origin, and even pixel count.  Multi-temporal analysis (dNBR,
+    burn-recovery trajectories) requires arrays with matching shape and
+    coordinates so they can be subtracted directly.  This function computes
+    the geographic intersection of all input scenes, builds a regular target
+    grid over that intersection at ``target_resolution`` metres, and resamples
+    each scene onto that grid using nearest-neighbour resampling by default.
+
+    Args:
+        datasets: List of two or more xarray Datasets produced by
+            :func:`load_ortho_scene` (or any source that exposes ``crs`` /
+            ``epsg`` in attrs and projected ``x``/``y`` coordinates).  All
+            datasets must share the same CRS.
+        target_bounds: Optional ``(xmin, ymin, xmax, ymax)`` in the common CRS
+            specifying the exact rectangle to resample onto.  When omitted the
+            intersection of input bounds is used.
+        target_resolution: Pixel size in CRS units (metres for UTM).  Defaults
+            to 30 m, the native ortho_sr spacing.
+        min_overlap_fraction: Minimum fraction of the smallest input scene's
+            area that must be covered by the intersection.  When the
+            intersection is smaller than this fraction the function raises
+            ``ValueError`` rather than producing a near-empty common grid.
+            Ignored when ``target_bounds`` is supplied (the caller has
+            explicitly opted into a chosen extent).
+        resampling: Resampling method — ``"nearest"`` (default), ``"bilinear"``,
+            or ``"cubic"``.  Nearest-neighbour preserves the original
+            reflectance values without interpolation artefacts.
+
+    Returns:
+        List of new Datasets in the same order as the input.  Each dataset
+        has identical ``y`` and ``x`` coordinate arrays (verified before
+        return), the original ``wavelength`` coordinate / per-band coords
+        (``fwhm``, ``good_wavelengths``) preserved, and ``attrs["crs"]``,
+        ``attrs["epsg"]``, plus a new ``attrs["aligned_to"]`` recording the
+        target grid extent.
+
+    Raises:
+        ValueError: If fewer than 2 datasets are passed, if any dataset is
+            missing CRS metadata, if CRSs differ across inputs, if the
+            intersection is empty, or if the overlap is below
+            ``min_overlap_fraction`` of the smallest input scene.
+
+    Notes:
+        Uses ``rioxarray`` (a thin wrapper over ``rasterio.warp.reproject``)
+        for the actual warp.  Datasets that already match the requested grid
+        exactly are still warped — the cost is negligible because the warp
+        loop becomes a memcpy when source and destination grids align.
+    """
+    if not isinstance(datasets, (list, tuple)) or len(datasets) < 2:
+        raise ValueError(
+            f"reproject_to_common_grid requires at least 2 datasets; got {len(datasets) if hasattr(datasets, '__len__') else type(datasets)}"
+        )
+
+    # ------------------------------------------------------------------ CRS
+    spatial_infos = [get_spatial_info(ds) for ds in datasets]
+    crs_values = [info["crs"] for info in spatial_infos]
+    if any(c is None for c in crs_values):
+        raise ValueError(
+            "All input datasets must have a CRS in attrs (crs/epsg) or as a "
+            "spatial_ref coord; received: " + repr(crs_values)
+        )
+    if len(set(crs_values)) > 1:
+        raise ValueError(
+            "All input datasets must share the same CRS; got " + repr(crs_values)
+        )
+    common_crs = crs_values[0]
+
+    # ----------------------------------------------------------------- Bounds
+    # Use pixel-edge extent (not pixel-centre min/max) so the intersection
+    # geometry matches the raster footprint stamped in StructMetadata.
+    bounds_list = [_pixel_edge_extent(info) for info in spatial_infos]
+
+    if target_bounds is None:
+        intersection = _intersect_bounds(bounds_list)
+        x0, y0, x1, y1 = intersection
+        if x1 <= x0 or y1 <= y0:
+            raise ValueError(
+                "Input scenes do not overlap: intersection bounds are "
+                f"({x0:.1f}, {y0:.1f}, {x1:.1f}, {y1:.1f}). Per-scene bounds: "
+                + ", ".join(repr(b) for b in bounds_list)
+            )
+
+        smallest_scene_area = min(_bounds_area(b) for b in bounds_list)
+        overlap_area = _bounds_area(intersection)
+        overlap_fraction = (
+            overlap_area / smallest_scene_area if smallest_scene_area > 0 else 0.0
+        )
+        if overlap_fraction < min_overlap_fraction:
+            raise ValueError(
+                f"Scene overlap is {overlap_fraction:.1%} of the smallest input "
+                f"scene, below the required {min_overlap_fraction:.0%} threshold. "
+                f"Scenes are too far apart to align meaningfully. Intersection: "
+                f"({x0:.1f}, {y0:.1f}, {x1:.1f}, {y1:.1f})"
+            )
+        log.info(
+            "reproject_to_common_grid: %d scenes, intersection area %.0f m² (%.1f%% of smallest scene)",
+            len(datasets),
+            overlap_area,
+            overlap_fraction * 100.0,
+        )
+        target = intersection
+    else:
+        x0, y0, x1, y1 = target_bounds
+        if x1 <= x0 or y1 <= y0:
+            raise ValueError(
+                f"target_bounds must satisfy xmin<xmax and ymin<ymax; got {target_bounds}"
+            )
+        target = target_bounds
+
+    # ------------------------------------------------------------- Build grid
+    if target_resolution <= 0:
+        raise ValueError(f"target_resolution must be positive; got {target_resolution}")
+
+    from rasterio.transform import from_origin
+
+    x_min, y_min, x_max, y_max = target
+    width = int(round((x_max - x_min) / target_resolution))
+    height = int(round((y_max - y_min) / target_resolution))
+    if width < 1 or height < 1:
+        raise ValueError(
+            f"Target grid would be empty: width={width}, height={height} from "
+            f"bounds {target} at resolution {target_resolution}"
+        )
+    # Origin convention: y descends from y_max (north) to y_min (south).
+    transform = from_origin(x_min, y_max, target_resolution, target_resolution)
+
+    resampling_method = _resampling_from_str(resampling)
+
+    # ------------------------------------------------------------- Reproject
+    import rioxarray  # noqa: F401  # registers the .rio accessor
+
+    aligned: list[xr.Dataset] = []
+    for ds, info in zip(datasets, spatial_infos):
+        # Pick the spatial DataArray to reproject. surface_reflectance and
+        # toa_radiance share the same underlying buffer in load_ortho_scene
+        # output; reproject one and reuse for both var aliases below.
+        primary_name = ds.attrs.get("data_var") or (
+            "surface_reflectance"
+            if "surface_reflectance" in ds.data_vars
+            else "toa_radiance"
+            if "toa_radiance" in ds.data_vars
+            else next(iter(ds.data_vars))
+        )
+        da = ds[primary_name]
+
+        # Rebuild the DataArray with rio-friendly metadata. We strip wavelength
+        # auxiliary coords that share the wavelength dim because rioxarray.reproject
+        # only cares about the spatial dims; we re-attach them after the warp.
+        wl_aux = {
+            name: ds.coords[name]
+            for name in ("fwhm", "good_wavelengths")
+            if name in ds.coords
+        }
+
+        rio_da = da.drop_vars(list(wl_aux.keys()), errors="ignore")
+        rio_da = rio_da.rio.set_spatial_dims(x_dim="x", y_dim="y", inplace=False)
+        rio_da = rio_da.rio.write_crs(info["crs"], inplace=False)
+
+        warped = rio_da.rio.reproject(
+            dst_crs=common_crs,
+            shape=(height, width),
+            transform=transform,
+            resampling=resampling_method,
+            nodata=np.nan,
+        )
+
+        # rioxarray writes its own spatial_ref scalar coord; keep it but also
+        # mirror crs/epsg in attrs so the rest of the pipeline (which reads
+        # attrs["crs"]) keeps working without depending on rioxarray.
+        new_attrs = dict(ds.attrs)
+        new_attrs["crs"] = common_crs
+        if "epsg" not in new_attrs:
+            try:
+                new_attrs["epsg"] = int(str(common_crs).split(":")[-1])
+            except (ValueError, IndexError):
+                pass
+        new_attrs["aligned_to"] = {
+            "bounds": tuple(float(v) for v in target),
+            "resolution": float(target_resolution),
+            "shape": (height, width),
+            "crs": common_crs,
+        }
+
+        warped = warped.rename(primary_name)
+
+        # Reassemble Dataset preserving the swath/ortho data_var aliases.
+        data_vars: dict = {primary_name: warped}
+        if "surface_reflectance" in ds.data_vars and "toa_radiance" in ds.data_vars:
+            # Preserve the alias relationship from load_ortho_scene.
+            other = "toa_radiance" if primary_name == "surface_reflectance" else "surface_reflectance"
+            data_vars[other] = warped.rename(other)
+
+        coords: dict = {
+            "wavelength": ds.coords["wavelength"],
+        }
+        for name, coord in wl_aux.items():
+            coords[name] = coord
+
+        new_ds = xr.Dataset(data_vars, coords=coords, attrs=new_attrs)
+        aligned.append(new_ds)
+
+    # Sanity check: x/y coords must be identical across all aligned scenes.
+    ref_x = aligned[0].coords["x"].values
+    ref_y = aligned[0].coords["y"].values
+    for i, ds in enumerate(aligned[1:], start=1):
+        if not np.array_equal(ds.coords["x"].values, ref_x):
+            raise RuntimeError(
+                f"Internal error: aligned scene {i} x-coordinates do not match scene 0"
+            )
+        if not np.array_equal(ds.coords["y"].values, ref_y):
+            raise RuntimeError(
+                f"Internal error: aligned scene {i} y-coordinates do not match scene 0"
+            )
+
+    return aligned

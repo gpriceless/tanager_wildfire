@@ -740,17 +740,20 @@ class TestDNBR:
         expected = 0.5 - (-0.25)
         np.testing.assert_allclose(result.values, expected, atol=1e-5)
 
-    def test_raises_on_spatial_dim_mismatch(self) -> None:
+    def test_raises_on_spatial_dim_mismatch_when_auto_align_disabled(self) -> None:
+        # auto_align=True (default) routes mismatched grids through
+        # reproject_to_common_grid; the legacy "must match" error path is
+        # preserved behind auto_align=False.
         pre = make_tanager_ds(shape=(4, 4))
         post = make_tanager_ds(shape=(8, 4))
-        with pytest.raises(ValueError, match="Spatial dimensions"):
-            dnbr(pre, post)
+        with pytest.raises(ValueError, match="match|auto_align"):
+            dnbr(pre, post, auto_align=False)
 
-    def test_raises_on_x_dim_mismatch(self) -> None:
+    def test_raises_on_x_dim_mismatch_when_auto_align_disabled(self) -> None:
         pre = make_tanager_ds(shape=(4, 4))
         post = make_tanager_ds(shape=(4, 8))
-        with pytest.raises(ValueError, match="Spatial dimensions"):
-            dnbr(pre, post)
+        with pytest.raises(ValueError, match="match|auto_align"):
+            dnbr(pre, post, auto_align=False)
 
     def test_zero_when_pre_equals_post(self) -> None:
         ds = make_tanager_ds(nir_val=0.5, swir2_val=0.3)

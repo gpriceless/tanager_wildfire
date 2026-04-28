@@ -16,7 +16,7 @@ import numpy as np
 import xarray as xr
 from scipy.spatial import ConvexHull
 
-from tanager.config import BAND_ALIASES, BAD_BAND_RANGES
+from tanager.config import BAD_BAND_RANGES, BAND_ALIASES
 
 logger = logging.getLogger(__name__)
 
@@ -481,7 +481,35 @@ def ndwi(dataset: xr.Dataset) -> xr.DataArray:
     return _normalized_difference(green, nir)
 
 
-def dnbr(pre: xr.Dataset, post: xr.Dataset) -> xr.DataArray:
+def _scenes_are_aligned(pre: xr.Dataset, post: xr.Dataset) -> bool:
+    """True when ``pre`` and ``post`` already share spatial dims and y/x coords.
+
+    Two scenes are considered aligned when they have the same ``y`` and ``x``
+    sizes AND, if both expose projected y/x coordinate arrays, those arrays are
+    element-wise equal.  Synthetic test datasets that only carry integer pixel
+    indices on y/x still satisfy the size check and are treated as aligned —
+    the reprojection path is reserved for real ortho_sr scenes whose UTM grids
+    differ.
+    """
+    if pre.sizes.get("y") != post.sizes.get("y"):
+        return False
+    if pre.sizes.get("x") != post.sizes.get("x"):
+        return False
+    if "x" in pre.coords and "x" in post.coords:
+        if not np.array_equal(pre.coords["x"].values, post.coords["x"].values):
+            return False
+    if "y" in pre.coords and "y" in post.coords:
+        if not np.array_equal(pre.coords["y"].values, post.coords["y"].values):
+            return False
+    return True
+
+
+def dnbr(
+    pre: xr.Dataset,
+    post: xr.Dataset,
+    *,
+    auto_align: bool = True,
+) -> xr.DataArray:
     """Compute differenced Normalized Burn Ratio (dNBR).
 
     dNBR = NBR(pre) - NBR(post)
@@ -491,25 +519,52 @@ def dnbr(pre: xr.Dataset, post: xr.Dataset) -> xr.DataArray:
 
     Args:
         pre: Pre-fire xarray Dataset with ``wavelength`` coordinate and
-            ``reflectance`` variable (shape: wavelength, y, x).
-        post: Post-fire xarray Dataset with the same structure.  Spatial
-            dimensions (y, x sizes) must match ``pre``.
+            ``reflectance`` (or ``surface_reflectance`` / ``toa_radiance``)
+            variable of shape (wavelength, y, x).
+        post: Post-fire xarray Dataset with the same structure.
+        auto_align: When ``True`` (default), if the two scenes do not share an
+            identical spatial grid, transparently call
+            :func:`tanager.io.reproject_to_common_grid` to put them on a common
+            grid before differencing.  When ``False``, mismatched grids raise
+            ``ValueError`` (legacy behaviour).
 
     Returns:
         DataArray of dNBR values with spatial dimensions (y, x).
 
     Raises:
-        ValueError: If the spatial dimensions of ``pre`` and ``post`` differ.
+        ValueError: If the spatial dimensions of ``pre`` and ``post`` differ
+            and ``auto_align=False``, or if ``auto_align=True`` and the scenes
+            do not overlap enough for co-registration to succeed.
     """
-    pre_y = pre.sizes.get("y")
-    pre_x = pre.sizes.get("x")
-    post_y = post.sizes.get("y")
-    post_x = post.sizes.get("x")
+    if not _scenes_are_aligned(pre, post):
+        if not auto_align:
+            raise ValueError(
+                f"Spatial dimensions of pre and post datasets must match: "
+                f"pre is ({pre.sizes.get('y')}, {pre.sizes.get('x')}), "
+                f"post is ({post.sizes.get('y')}, {post.sizes.get('x')}). "
+                f"Pass auto_align=True (default) or call "
+                f"tanager.io.reproject_to_common_grid first."
+            )
+        # Defer the import to avoid a circular module load at import time
+        # (io.py does not import spectral.py, but spectral.py importing io.py
+        # at module scope would still work; keep the lazy import to make the
+        # alignment dependency obvious to readers).
+        from tanager.io import get_spatial_info, reproject_to_common_grid
 
-    if (pre_y, pre_x) != (post_y, post_x):
-        raise ValueError(
-            f"Spatial dimensions of pre and post datasets must match: "
-            f"pre is ({pre_y}, {pre_x}), post is ({post_y}, {post_x})."
+        pre_info = get_spatial_info(pre)
+        post_info = get_spatial_info(post)
+        logger.warning(
+            "dnbr: pre/post scenes are not on the same grid (pre %s, post %s); "
+            "auto-aligning via reproject_to_common_grid",
+            pre_info["shape"],
+            post_info["shape"],
+        )
+        pre, post = reproject_to_common_grid([pre, post])
+        aligned_info = get_spatial_info(pre)
+        logger.info(
+            "dnbr: aligned grid shape=%s bounds=%s",
+            aligned_info["shape"],
+            aligned_info["bounds"],
         )
 
     return nbr(pre) - nbr(post)
