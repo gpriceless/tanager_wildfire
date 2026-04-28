@@ -158,6 +158,7 @@ Core unmixing works. A synthetic 5×5 image (10 bands, 60% pv + 40% soil mixture
 - `library` expects `(n_bands, n_endmembers)` — bands-first, columns are spectra.
 - `look_up_table` must be `dict[int, dict[tuple[int,...], np.ndarray]]` — outer key is level (2=2-EM, 3=3-EM), inner key is a **tuple of class indices** (not a string), value is array of endmember index combinations.
 - `em_per_class` is `dict[str, list[int]]` mapping class name to library column indices.
+- `MesmaCore.execute()` returns a **4-tuple**: `(model_indices, fractions, rmse_map, residual_image)` — NOT an object with `.get_fractions()`/`.get_rmse()` methods. Unpack as: `_, fractions, rmse_map, _ = core.execute(...)`
 - Output `fractions` shape: `(n_classes+1, rows, cols)` — last channel is shade.
 - Unmodeled pixels: fractions=0, rmse=9999 (not NaN — requires post-processing to convert to NaN).
 
