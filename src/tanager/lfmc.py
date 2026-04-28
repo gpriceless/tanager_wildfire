@@ -476,3 +476,174 @@ def compute_lfmc_indices(scene: Any) -> xr.Dataset:
         ", ".join(indices.data_vars),
     )
     return indices
+
+
+# ---------------------------------------------------------------------------
+# Globe-LFMC 2.0 ground truth loader
+# ---------------------------------------------------------------------------
+
+
+# Tolerant column-name lookup for Globe-LFMC 2.0 distributions. The DOI-hosted
+# CSV uses ``Latitude``/``Longitude``/``Date``/``LFMC_value`` etc.; some
+# downstream redistributions strip casing or rename. We normalize once at load.
+_GLOBE_LFMC_COLUMN_ALIASES: Mapping[str, Tuple[str, ...]] = {
+    "latitude": ("latitude", "lat"),
+    "longitude": ("longitude", "lon", "long", "lng"),
+    "date": ("date", "observation_date", "sampling_date", "obs_date"),
+    "lfmc_percent": (
+        "lfmc_percent",
+        "lfmc",
+        "lfmc_value",
+        "lfmc_%",
+        "live_fuel_moisture",
+    ),
+    "species": ("species", "species_name", "scientific_name"),
+    "site_name": ("site_name", "site", "sitename", "location_name", "location"),
+    "vegetation_type": (
+        "vegetation_type",
+        "veg_type",
+        "vegetation",
+        "land_cover",
+        "vegetation_class",
+    ),
+}
+
+
+def _normalize_globe_lfmc_columns(columns: Iterable[str]) -> dict[str, str]:
+    """Map an input CSV's columns onto our canonical schema using lowercase aliases."""
+    cols_l = {c.strip().lower(): c for c in columns}
+    rename: dict[str, str] = {}
+    for canonical, aliases in _GLOBE_LFMC_COLUMN_ALIASES.items():
+        for alias in aliases:
+            if alias in cols_l and cols_l[alias] != canonical:
+                rename[cols_l[alias]] = canonical
+                break
+    return rename
+
+
+def load_globe_lfmc(
+    data_path: Any,
+    *,
+    region_bbox: Optional[Tuple[float, float, float, float]] = None,
+    vegetation_types: Optional[Sequence[str]] = None,
+    tanager_scene_dates: Optional[Sequence[Any]] = None,
+    colocation_window_days: int = 30,
+) -> Any:
+    """Load Globe-LFMC 2.0 observations as a filtered GeoDataFrame.
+
+    Globe-LFMC 2.0 (Yebra et al. 2024, DOI 10.1038/s41597-024-03159-6) is the
+    canonical global database of in-situ live fuel moisture observations. This
+    function reads the published CSV (or any file ``pandas.read_csv`` can
+    consume), normalizes the column names against
+    ``_GLOBE_LFMC_COLUMN_ALIASES``, applies optional spatial / vegetation
+    filters, and returns a GeoPandas GeoDataFrame ready for
+    :func:`train_lfmc_plsr` ground-truth assembly.
+
+    Args:
+        data_path: Path to the Globe-LFMC CSV (or any file ``pandas.read_csv``
+            can read). Must exist on disk; this loader does not download.
+        region_bbox: Optional ``(west, south, east, north)`` bounding box in
+            WGS84 degrees. Observations outside the box are dropped.
+        vegetation_types: Optional list of vegetation-type strings used as
+            case-insensitive substring filters against the
+            ``vegetation_type`` column (or ``species`` if vegetation_type is
+            not present). Matches any pattern in the list.
+        tanager_scene_dates: Optional iterable of Tanager scene capture dates.
+            When supplied, each row gets a ``tanager_colocated`` boolean set
+            True iff its observation date falls within
+            ``colocation_window_days`` of *any* scene date.
+        colocation_window_days: Half-window for the colocation flag. Default 30.
+
+    Returns:
+        ``geopandas.GeoDataFrame`` with EPSG:4326 geometry and at least the
+        canonical columns ``longitude``, ``latitude``, ``date``,
+        ``lfmc_percent``, plus ``species``, ``site_name``,
+        ``vegetation_type``, and ``tanager_colocated`` when available in the
+        source.
+
+    Raises:
+        FileNotFoundError: If ``data_path`` does not point to an existing file.
+        ValueError: If the source CSV is missing any of the required columns
+            after alias normalization (``latitude``, ``longitude``, ``date``,
+            ``lfmc_percent``).
+    """
+    from pathlib import Path
+
+    import pandas as pd
+    import geopandas as gpd
+
+    path = Path(data_path)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Globe-LFMC data not found at {path}. Download from "
+            "https://doi.org/10.6084/m9.figshare.24745469 or pass an "
+            "alternative local CSV path."
+        )
+
+    df = pd.read_csv(path)
+    rename = _normalize_globe_lfmc_columns(df.columns)
+    if rename:
+        df = df.rename(columns=rename)
+
+    required = {"latitude", "longitude", "date", "lfmc_percent"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(
+            f"Globe-LFMC CSV missing required columns after alias normalization: "
+            f"{sorted(missing)}. Found columns: {sorted(df.columns.tolist())}"
+        )
+
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date", "latitude", "longitude", "lfmc_percent"])
+    df["latitude"] = df["latitude"].astype(float)
+    df["longitude"] = df["longitude"].astype(float)
+    df["lfmc_percent"] = df["lfmc_percent"].astype(float)
+
+    if region_bbox is not None:
+        west, south, east, north = region_bbox
+        in_bbox = (
+            (df["longitude"] >= west)
+            & (df["longitude"] <= east)
+            & (df["latitude"] >= south)
+            & (df["latitude"] <= north)
+        )
+        df = df[in_bbox]
+
+    if vegetation_types is not None and len(vegetation_types) > 0:
+        veg_col = (
+            "vegetation_type" if "vegetation_type" in df.columns else (
+                "species" if "species" in df.columns else None
+            )
+        )
+        if veg_col is None:
+            logger.warning(
+                "load_globe_lfmc: vegetation_types filter requested but neither "
+                "'vegetation_type' nor 'species' column present; skipping filter."
+            )
+        else:
+            patterns = [str(v).strip().lower() for v in vegetation_types]
+            haystack = df[veg_col].astype(str).str.lower()
+            mask = haystack.apply(lambda s: any(p in s for p in patterns))
+            df = df[mask]
+
+    if tanager_scene_dates is not None and len(list(tanager_scene_dates)) > 0:
+        scene_dates = pd.to_datetime(list(tanager_scene_dates))
+        window = pd.Timedelta(days=int(colocation_window_days))
+
+        def _is_colocated(d: Any) -> bool:
+            return bool(((scene_dates - d).to_series().abs() <= window).any())
+
+        df["tanager_colocated"] = df["date"].apply(_is_colocated)
+    else:
+        df["tanager_colocated"] = False
+
+    geom = gpd.points_from_xy(df["longitude"], df["latitude"])
+    gdf = gpd.GeoDataFrame(df.reset_index(drop=True), geometry=geom, crs="EPSG:4326")
+
+    logger.info(
+        "load_globe_lfmc: %d observations after filtering (bbox=%s, veg_types=%s)",
+        len(gdf),
+        region_bbox,
+        vegetation_types,
+    )
+    return gdf
