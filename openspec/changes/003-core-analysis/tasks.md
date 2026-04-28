@@ -188,7 +188,7 @@
 <!-- execution_mode: sequential -->
 <!-- network: none — all operations on in-memory DataArrays -->
 
-- [ ] Implement `select_endmembers_incob(library, max_per_class)` using count-based selection within each class
+- [x] Implement `select_endmembers_incob(library, max_per_class)` using count-based selection within each class
   <!-- files: src/tanager/endmembers.py (modify) -->
   <!-- gotcha: In-CoB (count-based) selection requires running each candidate endmember against
        image pixels to count how many pixels it "wins" (best-fit model). This means the function
@@ -202,7 +202,7 @@
   <!-- test: tests/test_endmembers.py — verify selection reduces count, respects max_per_class -->
   <!-- acceptance: output has <= max_per_class per class; class labels preserved -->
 
-- [ ] Implement `prune_endmembers_ear_masa(library, threshold_ear, threshold_masa)` wrapping spectral-libraries EarMasaCob
+- [x] Implement `prune_endmembers_ear_masa(library, threshold_ear, threshold_masa)` wrapping spectral-libraries EarMasaCob
   <!-- files: src/tanager/endmembers.py (modify) -->
   <!-- pattern: *** CORRECTED IMPORT PATH (QA verified) ***
        `from spectral_libraries.core.ear_masa_cob import EarMasaCob` — NOT from top-level package.
@@ -217,7 +217,7 @@
   <!-- test: tests/test_endmembers.py — verify pruning reduces count -->
   <!-- acceptance: pruned library has fewer spectra; both EAR and MASA thresholds applied -->
 
-- [ ] Implement `extract_image_endmembers(scene, method, regions)` for spatial ROI extraction and PPI
+- [x] Implement `extract_image_endmembers(scene, method, regions)` for spatial ROI extraction and PPI
   <!-- files: src/tanager/endmembers.py (modify) -->
   <!-- pattern: method="spatial" — extract mean spectrum from each region (dict of {class_name: (y_slice, x_slice)}).
        method="ppi" — use SPy's PPI algorithm: `from spectral import PPI; ppi = PPI(image, n_iterations)`.
@@ -230,7 +230,7 @@
   <!-- test: tests/test_endmembers.py — test spatial extraction on synthetic dataset with known signatures -->
   <!-- acceptance: extracted spectra match library schema; spatial method returns mean of ROI pixels -->
 
-- [ ] Implement `build_fire_library(scene_pre, scene_post, frames_dir, usgs_dir)` — convenience function that orchestrates the full library build pipeline: load -> resample -> merge -> select -> prune -> return final library (~52-78 spectra)
+- [x] Implement `build_fire_library(scene_pre, scene_post, frames_dir, usgs_dir)` — convenience function that orchestrates the full library build pipeline: load -> resample -> merge -> select -> prune -> return final library (~52-78 spectra)
   <!-- files: src/tanager/endmembers.py (modify) -->
   <!-- pattern: orchestration function that calls the individual functions in sequence:
        1. load_usgs_library(usgs_dir) -> resample_library(target_wl)
@@ -254,7 +254,7 @@
   <!-- test: tests/test_endmembers.py — test with mocked loaders, verify output size 50-80 -->
   <!-- acceptance: returns library with 50-80 spectra; all fire-relevant classes represented; shade included -->
 
-- [ ] Verify: Full pipeline produces a library with 50-80 spectra across all fire-relevant classes
+- [x] Verify: Full pipeline produces a library with 50-80 spectra across all fire-relevant classes
   <!-- verify: integration test with real or synthetic data -->
   <!-- acceptance: library has spectra in classes: char, ash, pv, npv, soil, shade -->
 

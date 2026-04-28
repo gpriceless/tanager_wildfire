@@ -314,6 +314,419 @@ def load_usgs_library(
 
 
 # ---------------------------------------------------------------------------
+# Endmember selection
+# ---------------------------------------------------------------------------
+
+
+def select_endmembers_incob(
+    library: xr.DataArray,
+    max_per_class: int,
+) -> xr.DataArray:
+    """Reduce a library to at most ``max_per_class`` spectra per class.
+
+    The "true" In-CoB algorithm (Roberts et al. 1998) ranks candidate
+    endmembers by how many image pixels they "win" as the best-fit model in a
+    full MESMA run. That requires unmixing.py — a circular dependency at
+    library construction time. This implementation is a simplified proxy:
+    rank within-class by spectral standard deviation (a coarse measure of
+    information content) and keep the top ``max_per_class``. Spectra with
+    higher across-band variability tend to be more representative of the
+    class's spectral envelope than near-flat or near-duplicate spectra.
+
+    The full In-CoB selection can run as a follow-up step after the unmixing
+    module exists and is left as a future enhancement.
+
+    Args:
+        library: Input library with a ``category`` coordinate.
+        max_per_class: Maximum number of endmembers to retain per category.
+            Must be a positive integer.
+
+    Returns:
+        Sub-library DataArray with the same schema. Class labels are
+        preserved; ``spectrum_id`` order matches the original ranking.
+
+    Raises:
+        ValueError: If ``library`` has no ``category`` coordinate or if
+            ``max_per_class < 1``.
+    """
+    if "category" not in library.coords:
+        raise ValueError("library must carry a 'category' coordinate")
+    if max_per_class < 1:
+        raise ValueError(f"max_per_class must be >= 1, got {max_per_class}")
+
+    categories = np.asarray(library.coords["category"].values, dtype=object)
+    spectra = np.asarray(library.values, dtype=np.float32)
+    std_per_spectrum = np.nanstd(spectra, axis=1)
+
+    keep_indices: list[int] = []
+    for cat in np.unique(categories):
+        cat_idx = np.where(categories == cat)[0]
+        # Rank within class by descending std; tie-break by original order.
+        order = cat_idx[np.argsort(-std_per_spectrum[cat_idx], kind="stable")]
+        keep_indices.extend(order[:max_per_class].tolist())
+
+    keep_indices.sort()  # preserve original spectrum_id ordering
+    return library.isel(spectrum_id=keep_indices)
+
+
+def build_fire_library(
+    *,
+    scene_pre: Optional[Union[xr.Dataset, xr.DataArray]] = None,
+    scene_post: Optional[Union[xr.Dataset, xr.DataArray]] = None,
+    target_wavelengths: Optional[np.ndarray] = None,
+    target_fwhm: Union[float, np.ndarray] = _DEFAULT_TARGET_FWHM_NM,
+    usgs_dir: Optional[Union[str, os.PathLike]] = None,
+    ecostress_sqlite: Optional[Union[str, os.PathLike]] = None,
+    frames_dir: Optional[Union[str, os.PathLike]] = None,
+    pre_regions: Optional[Mapping[str, Tuple[slice, slice]]] = None,
+    post_regions: Optional[Mapping[str, Tuple[slice, slice]]] = None,
+    max_per_class: int = 15,
+    threshold_ear: float = 0.025,
+    threshold_masa: float = 10.0,
+    add_shade: bool = True,
+) -> xr.DataArray:
+    """Orchestrate the full endmember library construction pipeline.
+
+    Runs (in order, skipping any source that is not provided):
+
+    1. ``load_usgs_library(usgs_dir)`` → ``resample_library``
+    2. ``load_ecostress_library(sqlite_path=ecostress_sqlite)`` → ``resample_library``
+    3. ``load_frames_library(frames_dir)`` → ``resample_library``
+    4. ``extract_image_endmembers(scene_pre, "spatial", pre_regions)``
+    5. ``extract_image_endmembers(scene_post, "spatial", post_regions)``
+    6. ``build_hybrid_library`` (merge all sources)
+    7. ``select_endmembers_incob(max_per_class)``
+    8. ``prune_endmembers_ear_masa(threshold_ear, threshold_masa)``
+    9. Append a single zero-reflectance shade spectrum if ``add_shade`` is True.
+
+    Args:
+        scene_pre: Pre-fire scene Dataset for image-derived vegetation
+            endmembers. Used together with ``pre_regions``.
+        scene_post: Post-fire scene Dataset for image-derived char/ash
+            endmembers. Used together with ``post_regions``.
+        target_wavelengths: Target band centres (nm). When ``None`` and a
+            scene is provided, the scene's wavelength coordinate is used.
+            Otherwise defaults to ``np.linspace(380, 2500, 426)``.
+        target_fwhm: Target sensor FWHM (scalar or per-band array). When the
+            scene Dataset carries a ``coords["fwhm"]`` array (Phase 2 update
+            to ``load_ortho_scene``), the caller should pass that for accuracy.
+        usgs_dir: Directory of USGS splib07a ASCII files, or ``None`` to skip.
+        ecostress_sqlite: Path to a pre-built ECOSTRESS SPy SQLite, or ``None``.
+        frames_dir: Directory of FRAMES SoCal ASCII files, or ``None``.
+        pre_regions: ROI mapping for ``extract_image_endmembers`` on the
+            pre-fire scene (typically ``{"pv": (...), "npv": (...), ...}``).
+        post_regions: ROI mapping for the post-fire scene (typically
+            ``{"char": (...), "ash": (...), ...}``).
+        max_per_class: Per-class cap for the In-CoB-style selection step.
+        threshold_ear: EAR threshold for pruning.
+        threshold_masa: MASA threshold (degrees) for pruning.
+        add_shade: When True, appends a zero-reflectance shade spectrum tagged
+            ``category="shade"``, ``source="synthetic"``.
+
+    Returns:
+        Final pruned library DataArray. Logs a warning if the result is
+        outside the 50-80 spectra recommended range.
+
+    Raises:
+        ValueError: If no source is provided (all loaders/scenes are ``None``).
+    """
+    # Resolve target wavelengths from scene metadata when possible.
+    if target_wavelengths is None:
+        for scene in (scene_pre, scene_post):
+            if scene is not None:
+                _, wls = _scene_to_reflectance_array(scene)
+                target_wavelengths = wls.astype(np.float32)
+                break
+        if target_wavelengths is None:
+            target_wavelengths = np.linspace(380.0, 2500.0, 426).astype(np.float32)
+
+    sources: list[xr.DataArray] = []
+
+    if usgs_dir is not None:
+        try:
+            usgs_lib = load_usgs_library(data_dir=usgs_dir)
+            sources.append(resample_library(usgs_lib, target_wavelengths, fwhm=target_fwhm))
+            logger.info("USGS library: %d spectra", usgs_lib.sizes["spectrum_id"])
+        except (FileNotFoundError, ValueError) as exc:
+            logger.warning("USGS library skipped: %s", exc)
+
+    if ecostress_sqlite is not None:
+        try:
+            eco_lib = load_ecostress_library(sqlite_path=ecostress_sqlite)
+            sources.append(resample_library(eco_lib, target_wavelengths, fwhm=target_fwhm))
+            logger.info("ECOSTRESS library: %d spectra", eco_lib.sizes["spectrum_id"])
+        except (FileNotFoundError, ValueError, RuntimeError) as exc:
+            logger.warning("ECOSTRESS library skipped: %s", exc)
+
+    if frames_dir is not None:
+        try:
+            frm_lib = load_frames_library(frames_dir)
+            sources.append(resample_library(frm_lib, target_wavelengths, fwhm=target_fwhm))
+            logger.info("FRAMES library: %d spectra", frm_lib.sizes["spectrum_id"])
+        except (FileNotFoundError, ValueError) as exc:
+            logger.warning("FRAMES library skipped: %s", exc)
+
+    if scene_pre is not None and pre_regions:
+        pre_em = extract_image_endmembers(scene_pre, method="spatial", regions=pre_regions)
+        sources.append(resample_library(pre_em, target_wavelengths, fwhm=target_fwhm))
+    if scene_post is not None and post_regions:
+        post_em = extract_image_endmembers(scene_post, method="spatial", regions=post_regions)
+        sources.append(resample_library(post_em, target_wavelengths, fwhm=target_fwhm))
+
+    if not sources:
+        raise ValueError(
+            "build_fire_library: no sources provided — at least one of usgs_dir, "
+            "ecostress_sqlite, frames_dir, or scene_pre/scene_post + regions is required."
+        )
+
+    merged = build_hybrid_library(*sources) if False else _merge_sources_in_order(sources)
+    selected = select_endmembers_incob(merged, max_per_class=max_per_class)
+
+    try:
+        pruned = prune_endmembers_ear_masa(
+            selected, threshold_ear=threshold_ear, threshold_masa=threshold_masa,
+        )
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.warning("prune_endmembers_ear_masa failed; using unpruned library: %s", exc)
+        pruned = selected
+
+    if add_shade:
+        shade_spec = np.zeros((1, target_wavelengths.size), dtype=np.float32)
+        shade_da = _build_library_dataarray(
+            shade_spec, target_wavelengths,
+            ["synthetic_shade_0001"], ["shade"], ["shade"], "synthetic",
+        )
+        # Drop optional per-spectrum coords (ear, masa_deg) so the shade
+        # DataArray, which lacks them, can be concatenated cleanly.
+        for optional in ("ear", "masa_deg"):
+            if optional in pruned.coords:
+                pruned = pruned.drop_vars(optional)
+        pruned = build_hybrid_library(usgs=pruned, image_derived=shade_da)
+
+    n_final = pruned.sizes["spectrum_id"]
+    logger.info("Final fire library: %d spectra across categories %s",
+                n_final, sorted(set(pruned.coords["category"].values.tolist())))
+    if not (50 <= n_final <= 80):
+        logger.warning(
+            "build_fire_library: final size %d is outside the 50-80 recommended range. "
+            "Consider tuning max_per_class or pruning thresholds.", n_final,
+        )
+    return pruned
+
+
+def _merge_sources_in_order(sources: Sequence[xr.DataArray]) -> xr.DataArray:
+    """Merge an ordered list of resampled libraries via build_hybrid_library.
+
+    Args:
+        sources: At least one resampled library DataArray.
+
+    Returns:
+        Merged DataArray.
+    """
+    if not sources:
+        raise ValueError("sources must contain at least one library")
+    merged = sources[0]
+    for nxt in sources[1:]:
+        merged = build_hybrid_library(usgs=merged, image_derived=nxt)
+    return merged
+
+
+def _scene_to_reflectance_array(scene: Union[xr.Dataset, xr.DataArray]) -> Tuple[xr.DataArray, np.ndarray]:
+    """Pull the reflectance DataArray and wavelength axis out of a scene.
+
+    Handles both ``xr.Dataset`` (one of ``reflectance``, ``surface_reflectance``,
+    or the first non-mask variable) and ``xr.DataArray`` inputs.
+
+    Args:
+        scene: Tanager scene Dataset (output of ``tanager.io.load_scene``) or a
+            bare reflectance DataArray with dims ``(wavelength, y, x)``.
+
+    Returns:
+        Tuple ``(reflectance_da, wavelengths_nm)``. ``reflectance_da`` has dims
+        ``(wavelength, y, x)``; ``wavelengths_nm`` is the 1D coordinate array.
+
+    Raises:
+        ValueError: If no reflectance-like variable can be found.
+    """
+    if isinstance(scene, xr.Dataset):
+        for candidate in ("reflectance", "surface_reflectance", "toa_radiance"):
+            if candidate in scene.data_vars:
+                refl = scene[candidate]
+                break
+        else:
+            data_vars = [v for v in scene.data_vars if "wavelength" in scene[v].dims]
+            if not data_vars:
+                raise ValueError("scene Dataset has no variable with a 'wavelength' dim")
+            refl = scene[data_vars[0]]
+    elif isinstance(scene, xr.DataArray):
+        refl = scene
+    else:
+        raise TypeError(f"scene must be xr.Dataset or xr.DataArray, got {type(scene).__name__}")
+
+    if "wavelength" not in refl.coords:
+        raise ValueError("reflectance DataArray must have a 'wavelength' coordinate")
+    wavelengths = np.asarray(refl.coords["wavelength"].values, dtype=np.float32)
+    return refl, wavelengths
+
+
+def extract_image_endmembers(
+    scene: Union[xr.Dataset, xr.DataArray],
+    method: str = "spatial",
+    regions: Optional[Mapping[str, Tuple[slice, slice]]] = None,
+    *,
+    n_pure_pixels: int = 30,
+    n_iterations: int = 1000,
+    seed: Optional[int] = None,
+) -> xr.DataArray:
+    """Extract image-derived endmembers from a Tanager scene.
+
+    Two modes are supported:
+
+    * ``method="spatial"`` — average the reflectance within each named region
+      and label the resulting spectrum with the region name. ``regions`` maps
+      a category string (e.g. ``"char"``) to a ``(y_slice, x_slice)`` window.
+    * ``method="ppi"`` — run the SPy Pixel Purity Index algorithm and return
+      the top ``n_pure_pixels`` purest pixels as anonymous spectra labelled
+      ``"image_derived"``.
+
+    Args:
+        scene: Tanager scene Dataset or reflectance DataArray with dims
+            ``(wavelength, y, x)``.
+        method: Either ``"spatial"`` or ``"ppi"``. Default ``"spatial"``.
+        regions: For ``"spatial"`` mode, a mapping of category name to
+            ``(y_slice, x_slice)`` windows. Required when ``method == "spatial"``.
+        n_pure_pixels: Number of top-purity pixels to return when
+            ``method == "ppi"``. Default 30.
+        n_iterations: Number of random projections for PPI. Default 1000;
+            production runs typically use 10000.
+        seed: Optional RNG seed for reproducible PPI runs.
+
+    Returns:
+        ``xr.DataArray`` with the standard library schema, ``source="image"``.
+
+    Raises:
+        ValueError: If ``method`` is unknown, if ``regions`` is missing for the
+            spatial method, or if no pure pixels are produced.
+    """
+    refl_da, wavelengths = _scene_to_reflectance_array(scene)
+
+    if method == "spatial":
+        if not regions:
+            raise ValueError("regions mapping is required when method='spatial'")
+        rows: list[np.ndarray] = []
+        spectrum_ids: list[str] = []
+        names: list[str] = []
+        cats: list[str] = []
+        for category, (y_slice, x_slice) in regions.items():
+            window = refl_da.isel(y=y_slice, x=x_slice)
+            mean_spectrum = window.mean(dim=("y", "x"), skipna=True).values
+            mean_spectrum = np.nan_to_num(mean_spectrum, nan=0.0).astype(np.float32)
+            rows.append(mean_spectrum)
+            spectrum_ids.append(f"image_{category.lower()}_{len(rows):04d}")
+            names.append(category)
+            cats.append(category.lower())
+        reflectance = np.vstack(rows).astype(np.float32)
+        return _build_library_dataarray(reflectance, wavelengths, spectrum_ids, names, cats, "image")
+
+    if method == "ppi":
+        from spectral import ppi as _ppi  # heavy dep — defer import
+
+        # SPy expects (rows, cols, bands); our DataArray is (wavelength, y, x).
+        cube = refl_da.transpose("y", "x", "wavelength").values
+        cube = np.nan_to_num(cube, nan=0.0).astype(np.float32)
+
+        if seed is not None:
+            np.random.seed(seed)
+        purity = _ppi(cube, niters=int(n_iterations))
+        flat_purity = purity.ravel()
+        # Pick the top `n_pure_pixels` indices with highest purity.
+        top_n = min(int(n_pure_pixels), flat_purity.size)
+        top_indices = np.argpartition(-flat_purity, top_n - 1)[:top_n]
+        top_indices = top_indices[np.argsort(-flat_purity[top_indices])]
+
+        ny, nx = purity.shape
+        flat_cube = cube.reshape(-1, cube.shape[-1])
+        rows = flat_cube[top_indices].astype(np.float32)
+        rows = np.clip(rows, _REFLECTANCE_MIN, _REFLECTANCE_MAX)
+        if rows.size == 0:
+            raise ValueError("PPI returned no pure pixels — check niters and threshold")
+
+        spectrum_ids = [f"image_ppi_{i:04d}" for i in range(rows.shape[0])]
+        names = [f"ppi_pixel_{idx}" for idx in top_indices.tolist()]
+        cats = ["unknown"] * rows.shape[0]
+        return _build_library_dataarray(rows, wavelengths, spectrum_ids, names, cats, "image")
+
+    raise ValueError(f"Unknown method {method!r}; expected 'spatial' or 'ppi'")
+
+
+def prune_endmembers_ear_masa(
+    library: xr.DataArray,
+    *,
+    threshold_ear: float = 0.025,
+    threshold_masa: float = 10.0,
+) -> xr.DataArray:
+    """Prune low-quality endmembers using the EAR/MASA criteria.
+
+    Wraps :class:`spectral_libraries.core.ear_masa_cob.EarMasaCob`. EAR
+    (Endmember Average RMSE) and MASA (Mean Spectral Angle) are the standard
+    Roberts-et-al-2018 quality metrics for endmember libraries. A spectrum
+    that exceeds **both** thresholds is considered redundant or noisy and
+    dropped from the library.
+
+    Args:
+        library: Input library with a ``category`` coordinate.
+        threshold_ear: Maximum acceptable EAR (RMSE units, typically 0-0.1).
+            Default 0.025 (Roberts et al. 2018).
+        threshold_masa: Maximum acceptable MASA (degrees). Default 10.0.
+
+    Returns:
+        Pruned library DataArray. Logs a warning when the resulting library
+        size is outside the recommended 50-80 spectra range. EAR and MASA
+        values for retained spectra are recorded in
+        ``library.coords["ear"]`` and ``library.coords["masa_deg"]``.
+
+    Raises:
+        ValueError: If ``library`` lacks a ``category`` coordinate.
+    """
+    if "category" not in library.coords:
+        raise ValueError("library must carry a 'category' coordinate")
+
+    from spectral_libraries.core.ear_masa_cob import EarMasaCob  # heavy dep
+
+    spectra = np.asarray(library.values, dtype=np.float32)  # (n_spec, n_bands)
+    class_list = np.asarray(library.coords["category"].values, dtype=str)
+    library_arr = spectra.T  # spectral_libraries wants (n_bands, n_spec)
+
+    ear, masa_rad, _cob_in, _cob_out, _cob_ratio = EarMasaCob.execute(
+        library_arr, class_list, log=lambda *args, **kwargs: None
+    )
+    masa_deg = np.degrees(masa_rad)
+
+    keep_mask = ~((ear > threshold_ear) & (masa_deg > threshold_masa))
+    keep_indices = np.where(keep_mask)[0].tolist()
+    if not keep_indices:
+        logger.warning(
+            "EAR/MASA pruning removed all spectra. Loosen thresholds (current EAR=%.4f, MASA=%.1f°)",
+            threshold_ear, threshold_masa,
+        )
+        # Fall back to keeping everything rather than returning an empty library.
+        keep_indices = list(range(spectra.shape[0]))
+
+    pruned = library.isel(spectrum_id=keep_indices).assign_coords(
+        ear=("spectrum_id", ear[keep_indices]),
+        masa_deg=("spectrum_id", masa_deg[keep_indices]),
+    )
+
+    n_kept = pruned.sizes["spectrum_id"]
+    if not (50 <= n_kept <= 80):
+        logger.warning(
+            "EAR/MASA pruning produced %d spectra (recommended 50-80). "
+            "Consider tightening or loosening thresholds.", n_kept,
+        )
+    return pruned
+
+
+# ---------------------------------------------------------------------------
 # Library merge with source tracking
 # ---------------------------------------------------------------------------
 
