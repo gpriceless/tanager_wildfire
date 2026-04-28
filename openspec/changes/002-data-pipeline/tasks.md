@@ -85,24 +85,24 @@
 <!-- execution_mode: sequential (within track) -->
 <!-- network: none for coding — verify step requires a downloaded .h5 file (local) -->
 
-- [ ] Create `src/tanager/io.py` with `load_scene(filepath)` wrapping HyperCoast `read_tanager()`, returning xarray.Dataset with (wavelength, y, x) dims
+- [x] Create `src/tanager/io.py` with `load_scene(filepath)` wrapping HyperCoast `read_tanager()`, returning xarray.Dataset with (wavelength, y, x) dims
   <!-- files: src/tanager/io.py (new) -->
   <!-- pattern: `import hypercoast; ds = hypercoast.read_tanager(filepath)`. Verify returned dims are (wavelength, y, x). If HyperCoast returns different dim names, rename to our convention. -->
   <!-- gotcha: HyperCoast read_tanager() signature: filepath, bands=None, stac_url=None, wavelengths=None, product=None, **kwargs. Returns xarray.Dataset with wavelength coordinate in nm. -->
 
-- [ ] Add `load_scene(filepath, wavelength_range)` for loading a band subset
+- [x] Add `load_scene(filepath, wavelength_range)` for loading a band subset
   <!-- files: src/tanager/io.py (modify) -->
   <!-- gotcha: HyperCoast's `bands` parameter takes band INDICES, not wavelength values. To support wavelength_range=(min_wl, max_wl), you must: (1) load wavelength metadata first (or load full dataset), (2) find band indices where wavelength is in range, (3) either pass those indices to read_tanager(bands=indices) or load full and slice. Option 2 (load then slice) is simpler and more reliable. If memory is a concern for the caller, document that the full dataset is loaded temporarily. -->
 
-- [ ] Add `get_spatial_info(dataset)` returning CRS, bounds, resolution, shape
+- [x] Add `get_spatial_info(dataset)` returning CRS, bounds, resolution, shape
   <!-- files: src/tanager/io.py (modify) -->
   <!-- gotcha: CRS and geotransform may be stored in dataset.attrs or in coordinate metadata. Check ds.attrs for 'crs', 'epsg', or 'spatial_ref'. Bounds from y/x coordinate min/max. Resolution from coordinate spacing. Shape from ds.dims. Return a dict with keys: crs, bounds, resolution, shape. -->
 
-- [ ] Add `ValueError` for invalid/corrupted HDF5 files
+- [x] Add `ValueError` for invalid/corrupted HDF5 files
   <!-- files: src/tanager/io.py (modify) -->
   <!-- gotcha: catch OSError (h5py/HDF5 read errors) and any HyperCoast exceptions. Re-raise as ValueError with descriptive message including the filepath. -->
 
-- [ ] Verify: Load a downloaded fire scene, confirm 426 bands x spatial grid, wavelength coordinate spans 380-2500nm
+- [x] Verify: Load a downloaded fire scene, confirm 426 bands x spatial grid, wavelength coordinate spans 380-2500nm
   <!-- verify: manual — requires a downloaded .h5 file. Run after Track A verify step provides a file. -->
   <!-- network: none — uses local file, but depends on Track A having downloaded a scene first -->
 
