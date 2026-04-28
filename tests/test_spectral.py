@@ -821,6 +821,60 @@ class TestContinuumRemoval:
         continuum_removal(ds)
         assert ds.sizes["wavelength"] == original_size
 
+    def test_upper_hull_correctness(self) -> None:
+        """Triangle-absorption spectrum: continuum >= reflectance everywhere,
+        and CR at the absorption centre is strictly less than 1.0."""
+        wavelengths = np.linspace(400.0, 2400.0, 21)
+        n = len(wavelengths)
+        # Flat baseline at 0.8 with a triangular dip to 0.3 at the centre.
+        reflectance = np.full(n, 0.8, dtype=np.float32)
+        centre = n // 2
+        for i in range(n):
+            dist = abs(i - centre)
+            if dist <= 4:
+                reflectance[i] = 0.8 - (0.5 * (1.0 - dist / 4.0))
+
+        ds = xr.Dataset(
+            {"reflectance": (["wavelength", "y", "x"], reflectance.reshape(n, 1, 1))},
+            coords={"wavelength": wavelengths},
+        )
+        result = continuum_removal(ds).values.squeeze()
+
+        # Continuum lies on or above the spectrum, so CR <= 1.0 everywhere.
+        assert np.all(result <= 1.0 + 1e-6), "CR exceeds 1.0 — continuum below spectrum"
+        # Absorption is detected at the centre.
+        assert result[centre] < 1.0, "Expected absorption (CR<1) at triangle centre"
+        assert result[centre] < 0.5, f"Expected deep absorption at centre, got {result[centre]}"
+
+    def test_flat_spectrum_returns_ones(self) -> None:
+        """A perfectly flat spectrum has its own value as the continuum;
+        CR therefore equals 1.0 at every wavelength."""
+        wavelengths = np.linspace(400.0, 2400.0, 30)
+        n = len(wavelengths)
+        reflectance = np.full((n, 1, 1), 0.5, dtype=np.float32)
+        ds = xr.Dataset(
+            {"reflectance": (["wavelength", "y", "x"], reflectance)},
+            coords={"wavelength": wavelengths},
+        )
+        result = continuum_removal(ds).values.squeeze()
+        np.testing.assert_allclose(result, 1.0, atol=1e-6)
+
+    def test_endpoints_are_one(self) -> None:
+        """The upper hull always passes through the first and last wavelength,
+        so CR at those endpoints must equal 1.0 for any spectrum."""
+        rng = np.random.default_rng(7)
+        wavelengths = np.linspace(400.0, 2400.0, 50)
+        n = len(wavelengths)
+        # Random non-flat spectrum to exercise the hull algorithm.
+        reflectance = rng.uniform(0.1, 0.9, size=n).astype(np.float32)
+        ds = xr.Dataset(
+            {"reflectance": (["wavelength", "y", "x"], reflectance.reshape(n, 1, 1))},
+            coords={"wavelength": wavelengths},
+        )
+        result = continuum_removal(ds).values.squeeze()
+        assert result[0] == pytest.approx(1.0, abs=1e-6)
+        assert result[-1] == pytest.approx(1.0, abs=1e-6)
+
 
 # ---------------------------------------------------------------------------
 # Task 29 explicit verification: NBR on synthetic data

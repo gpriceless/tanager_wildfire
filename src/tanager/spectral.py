@@ -14,7 +14,6 @@ from typing import Optional, Sequence, Tuple, Union
 
 import numpy as np
 import xarray as xr
-from scipy.spatial import ConvexHull
 
 from tanager.config import BAD_BAND_RANGES, BAND_ALIASES
 
@@ -578,10 +577,13 @@ def dnbr(
 def _continuum_removal_spectrum(reflectance: np.ndarray, wavelengths: np.ndarray) -> np.ndarray:
     """Apply convex hull continuum removal to a single spectrum.
 
-    The upper convex hull of the (wavelength, reflectance) point set is
-    computed, interpolated back to every wavelength, and used as the continuum.
-    The spectrum is then divided by the continuum.  Results are clipped to
-    [0, 1].
+    Computes the *upper* convex hull of the (wavelength, reflectance) point
+    set using Andrew's monotone-chain algorithm restricted to right turns,
+    interpolates it back to every wavelength to form the continuum, and
+    divides the spectrum by it. The full ``scipy.spatial.ConvexHull`` returns
+    both upper and lower hull vertices and so produces a continuum that
+    drops into absorption features rather than spanning over them; the
+    monotone chain keeps only the upper boundary.
 
     Args:
         reflectance: 1-D array of reflectance values (unitless, typically 0–1).
@@ -591,25 +593,44 @@ def _continuum_removal_spectrum(reflectance: np.ndarray, wavelengths: np.ndarray
     Returns:
         1-D array of continuum-removed reflectance values in [0, 1].
     """
-    points = np.column_stack([wavelengths, reflectance])
-
-    if len(points) < 3:
-        # Cannot form a convex hull with fewer than 3 points; return ones.
+    n = len(reflectance)
+    if n < 3:
+        # Cannot form a hull with fewer than 3 points; return ones.
         return np.ones_like(reflectance, dtype=np.float64)
 
     try:
-        hull = ConvexHull(points)
-        # Extract hull vertices; ConvexHull uses the full (lower + upper) hull.
-        # We want only the upper hull — vertices with maximum y for each x.
-        # Strategy: take all hull vertices, sort by wavelength, then keep only
-        # those that lie on the upper boundary via monotone chain.
-        hull_pts = points[hull.vertices]
-        hull_pts = hull_pts[np.argsort(hull_pts[:, 0])]
-        # Interpolate upper hull to all wavelengths
-        continuum = np.interp(wavelengths, hull_pts[:, 0], hull_pts[:, 1])
+        # Operate in wavelength-sorted space, then restore caller's order.
+        order = np.argsort(wavelengths)
+        wl_s = wavelengths[order].astype(np.float64)
+        r_s = reflectance[order].astype(np.float64)
+
+        upper: list[Tuple[float, float]] = []
+        for i in range(n):
+            while len(upper) >= 2:
+                ox, oy = upper[-2]
+                ax, ay = upper[-1]
+                bx, by = wl_s[i], r_s[i]
+                # Cross product of (a − o) and (b − o). For the upper hull we
+                # keep only strict right turns (cross < 0); discard collinear
+                # and left-turning vertices that would dip into the spectrum.
+                cross = (ax - ox) * (by - oy) - (ay - oy) * (bx - ox)
+                if cross >= 0.0:
+                    upper.pop()
+                else:
+                    break
+            upper.append((wl_s[i], r_s[i]))
+
+        hull_x = np.array([p[0] for p in upper], dtype=np.float64)
+        hull_y = np.array([p[1] for p in upper], dtype=np.float64)
+        continuum_sorted = np.interp(wl_s, hull_x, hull_y)
+
+        # Restore caller's wavelength order.
+        inv = np.empty_like(order)
+        inv[order] = np.arange(n)
+        continuum = continuum_sorted[inv]
     except Exception:
-        # If hull fails (e.g., all-zero or collinear spectrum), use the
-        # maximum value as a flat continuum to avoid dividing by zero.
+        # If the algorithm fails (e.g., all-NaN or pathological spectrum),
+        # use the maximum value as a flat continuum to avoid dividing by zero.
         max_val = float(np.max(reflectance))
         continuum = np.full_like(reflectance, max_val if max_val > 0 else 1.0, dtype=np.float64)
 
