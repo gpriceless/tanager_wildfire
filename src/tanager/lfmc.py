@@ -647,3 +647,171 @@ def load_globe_lfmc(
         vegetation_types,
     )
     return gdf
+
+
+# ---------------------------------------------------------------------------
+# Tier 2 — PLSR
+# ---------------------------------------------------------------------------
+
+
+def _compute_vip(model: Any) -> np.ndarray:
+    """Variable Importance in Projection (VIP) scores for a fitted PLSRegression.
+
+    Standard PLS-VIP formula::
+
+        VIP_j = sqrt(p * sum_h(SS_h * (w_{jh} / ||w_h||)^2) / sum_h(SS_h))
+
+    where ``p`` is the number of predictor variables, ``h`` indexes
+    components, ``SS_h`` is the explained sum-of-squares of component ``h``
+    (``t_h^T t_h * q_h^T q_h``), and ``w_{jh}`` is the weight of variable
+    ``j`` in component ``h``.
+    """
+    T = np.asarray(model.x_scores_, dtype=np.float64)
+    W = np.asarray(model.x_weights_, dtype=np.float64)
+    Q = np.asarray(model.y_loadings_, dtype=np.float64)
+
+    p, h = W.shape
+    ss = np.zeros(h, dtype=np.float64)
+    for i in range(h):
+        ss[i] = (T[:, i] @ T[:, i]) * (Q[:, i] @ Q[:, i])
+    total_ss = float(ss.sum())
+    if total_ss <= 0.0:
+        return np.zeros(p, dtype=np.float64)
+
+    vip = np.zeros(p, dtype=np.float64)
+    for j in range(p):
+        weighted = 0.0
+        for i in range(h):
+            w_norm_sq = float(W[:, i] @ W[:, i])
+            if w_norm_sq > 0.0:
+                weighted += ss[i] * (W[j, i] ** 2) / w_norm_sq
+        vip[j] = np.sqrt(p * weighted / total_ss)
+    return vip
+
+
+def train_lfmc_plsr(
+    spectra: np.ndarray,
+    lfmc_values: np.ndarray,
+    n_components: int = 10,
+    *,
+    cv_folds: int = 5,
+) -> dict[str, Any]:
+    """Fit a Partial Least Squares regression from reflectance to LFMC.
+
+    Performs k-fold cross-validated component selection over
+    ``[1, n_components]`` (clipped against sample / feature counts) and
+    returns the model fit at the best component count along with R² / RMSE
+    on the held-out folds and per-band VIP scores. VIP highlights which
+    wavelengths drove the regression — a sanity check that the model is
+    keying on water-absorption bands rather than spurious correlations.
+
+    Args:
+        spectra: 2-D array of shape ``(n_samples, n_bands)``. Bad bands
+            should be removed by the caller before training (Tanager
+            ortho_sr has ~330 good bands after the standard bad-band mask).
+        lfmc_values: 1-D array of LFMC values in percent (typical 30–200 %).
+        n_components: Upper bound on PLS components to search. Default 10.
+            The actual maximum is clipped to ``min(n_samples-1, n_features)``.
+        cv_folds: K for K-fold cross-validation. Default 5; clipped to the
+            sample count.
+
+    Returns:
+        Dict with keys:
+            ``model``: fitted ``sklearn.cross_decomposition.PLSRegression``
+                refit on all valid samples at the best component count.
+            ``r2``: cross-validated R² at the best component count (float).
+            ``rmse``: cross-validated RMSE at the best component count
+                (float, in LFMC units = percent).
+            ``n_components_optimal``: selected number of components (int).
+            ``vip_scores``: 1-D array of length ``n_features`` carrying the
+                VIP score for each wavelength.
+
+    Raises:
+        ValueError: If shapes mismatch, fewer than two valid samples remain
+            after NaN filtering, or ``n_components`` is non-positive.
+    """
+    if n_components < 1:
+        raise ValueError(f"n_components must be >= 1; got {n_components}")
+
+    X = np.asarray(spectra, dtype=np.float64)
+    y = np.asarray(lfmc_values, dtype=np.float64).ravel()
+    if X.ndim != 2:
+        raise ValueError(f"spectra must be 2-D (n_samples, n_bands); got {X.ndim}-D")
+    if X.shape[0] != y.size:
+        raise ValueError(
+            f"spectra has {X.shape[0]} samples but lfmc_values has {y.size}"
+        )
+
+    finite_rows = np.all(np.isfinite(X), axis=1) & np.isfinite(y)
+    X = X[finite_rows]
+    y = y[finite_rows]
+    n_samples, n_features = X.shape
+
+    if n_samples < 2:
+        raise ValueError(
+            f"need at least 2 valid samples for PLSR; got {n_samples} after NaN filter"
+        )
+
+    max_components = min(n_components, n_samples - 1, n_features)
+    if max_components < 1:
+        raise ValueError(
+            f"max_components clipped to {max_components}; need at least one component"
+        )
+
+    cv_actual = max(2, min(cv_folds, n_samples))
+
+    from sklearn.cross_decomposition import PLSRegression
+    from sklearn.model_selection import cross_val_score
+
+    best_rmse = float("inf")
+    best_n = 1
+    for n in range(1, max_components + 1):
+        candidate = PLSRegression(n_components=n)
+        try:
+            neg_mse = cross_val_score(
+                candidate, X, y, cv=cv_actual, scoring="neg_mean_squared_error"
+            )
+        except Exception as exc:  # pragma: no cover - defensive guard
+            logger.debug(
+                "train_lfmc_plsr: PLS with n_components=%d failed CV (%s); skipping",
+                n,
+                exc,
+            )
+            continue
+        candidate_rmse = float(np.sqrt(-np.mean(neg_mse)))
+        if candidate_rmse < best_rmse:
+            best_rmse = candidate_rmse
+            best_n = n
+
+    model = PLSRegression(n_components=best_n)
+    r2_cv = float(
+        np.mean(cross_val_score(model, X, y, cv=cv_actual, scoring="r2"))
+    )
+    rmse_cv = float(
+        np.sqrt(
+            -np.mean(
+                cross_val_score(
+                    model, X, y, cv=cv_actual, scoring="neg_mean_squared_error"
+                )
+            )
+        )
+    )
+    model.fit(X, y)
+    vip = _compute_vip(model)
+
+    logger.info(
+        "train_lfmc_plsr: n_samples=%d n_features=%d n_components_optimal=%d cv_r2=%.4f cv_rmse=%.4f",
+        n_samples,
+        n_features,
+        best_n,
+        r2_cv,
+        rmse_cv,
+    )
+
+    return {
+        "model": model,
+        "r2": r2_cv,
+        "rmse": rmse_cv,
+        "n_components_optimal": best_n,
+        "vip_scores": vip,
+    }
