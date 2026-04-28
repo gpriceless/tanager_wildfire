@@ -186,16 +186,22 @@ class TestCloudMaskDataVariable:
 # ---------------------------------------------------------------------------
 
 
+def _patch_field_reader(fields: dict[str, np.ndarray | None]):
+    """Patch _read_mask_field_from_hdf5 to return per-field arrays from a dict."""
+    def fake_reader(filepath, field_name):
+        return fields.get(field_name)
+    return patch("tanager.masks._read_mask_field_from_hdf5", side_effect=fake_reader)
+
+
 class TestCloudMaskHDF5:
     def test_reads_from_hdf5_via_filepath_arg(self) -> None:
         ds = make_spectral_dataset(shape=(3, 3))
-        flag = np.zeros((3, 3), dtype=np.int8)
-        flag[0, 0] = 1
+        cirrus = np.zeros((3, 3), dtype=np.int8)
+        cirrus[0, 0] = 1
 
-        with patch("tanager.masks._read_beta_cirrus_from_hdf5", return_value=flag) as mock_read:
+        with _patch_field_reader({"beta_cirrus_mask": cirrus, "beta_cloud_mask": None}):
             result = cloud_mask(ds, filepath="/fake/file.h5")
 
-        mock_read.assert_called_once_with("/fake/file.h5")
         assert not result.values[0, 0]
         assert result.values[1, 1]
 
@@ -204,21 +210,170 @@ class TestCloudMaskHDF5:
         ds.encoding["source"] = "/encoded/file.h5"
         flag = np.zeros((3, 3), dtype=np.int8)
 
-        with patch("tanager.masks._read_beta_cirrus_from_hdf5", return_value=flag):
+        with _patch_field_reader({"beta_cirrus_mask": flag, "beta_cloud_mask": None}):
             result = cloud_mask(ds)
 
         assert result.values.all()
 
     def test_shape_mismatch_falls_through_to_allTrue(self) -> None:
         ds = make_spectral_dataset(shape=(3, 3))
-        # Return a mask with wrong shape
+        # Return a mask with wrong shape — should be ignored
         wrong_shape_flag = np.zeros((5, 5), dtype=np.int8)
 
-        with patch("tanager.masks._read_beta_cirrus_from_hdf5", return_value=wrong_shape_flag):
+        with _patch_field_reader({"beta_cirrus_mask": wrong_shape_flag, "beta_cloud_mask": None}):
             result = cloud_mask(ds, filepath="/fake/file.h5")
 
-        # Shape mismatch: fall through to all-True
+        # Shape mismatch on every field: fall through to all-True
         assert result.values.all()
+
+    def test_or_combines_cirrus_and_cloud(self) -> None:
+        """Both fields contribute — pixel is cloudy if either flags it (LGT-297)."""
+        ds = make_spectral_dataset(shape=(3, 3))
+        cirrus = np.zeros((3, 3), dtype=np.int8)
+        cirrus[0, 0] = 1  # cirrus flags (0,0)
+        cloud = np.zeros((3, 3), dtype=np.int8)
+        cloud[1, 1] = 1  # cloud flags (1,1)
+
+        with _patch_field_reader({"beta_cirrus_mask": cirrus, "beta_cloud_mask": cloud}):
+            result = cloud_mask(ds, filepath="/fake/file.h5")
+
+        # Both flagged pixels should be False (cloudy); others True (clear)
+        assert not result.values[0, 0]
+        assert not result.values[1, 1]
+        assert result.values[0, 1]
+        assert result.values[2, 2]
+
+    def test_only_beta_cloud_mask_present(self) -> None:
+        """If cirrus is missing but cloud is present, mask still works (LGT-297)."""
+        ds = make_spectral_dataset(shape=(3, 3))
+        cloud = np.zeros((3, 3), dtype=np.int8)
+        cloud[2, 2] = 1
+
+        with _patch_field_reader({"beta_cirrus_mask": None, "beta_cloud_mask": cloud}):
+            result = cloud_mask(ds, filepath="/fake/file.h5")
+
+        assert not result.values[2, 2]
+        assert result.values[0, 0]
+
+
+class TestCandidateMaskPaths:
+    """The path-search helper covers SWATHS and GRIDS layouts (LGT-297)."""
+
+    def test_grids_path_present_for_cirrus(self) -> None:
+        from tanager.masks import _candidate_mask_paths
+
+        paths = _candidate_mask_paths("beta_cirrus_mask")
+        assert "/HDFEOS/GRIDS/HYP/Data Fields/beta_cirrus_mask" in paths
+
+    def test_grids_path_present_for_cloud(self) -> None:
+        from tanager.masks import _candidate_mask_paths
+
+        paths = _candidate_mask_paths("beta_cloud_mask")
+        assert "/HDFEOS/GRIDS/HYP/Data Fields/beta_cloud_mask" in paths
+
+    def test_swaths_path_still_searched(self) -> None:
+        from tanager.masks import _candidate_mask_paths
+
+        paths = _candidate_mask_paths("beta_cirrus_mask")
+        assert "/HDFEOS/SWATHS/HYP/Data Fields/beta_cirrus_mask" in paths
+        assert "/HDFEOS/SWATHS/HYP/Metadata/beta_cirrus_mask" in paths
+
+    def test_grids_path_searched_before_swaths(self) -> None:
+        """Ortho SR is the production layout — search GRIDS first."""
+        from tanager.masks import _candidate_mask_paths
+
+        paths = _candidate_mask_paths("beta_cirrus_mask")
+        grids_idx = paths.index("/HDFEOS/GRIDS/HYP/Data Fields/beta_cirrus_mask")
+        swaths_idx = paths.index("/HDFEOS/SWATHS/HYP/Data Fields/beta_cirrus_mask")
+        assert grids_idx < swaths_idx
+
+
+class TestReadMaskFieldFromHDF5:
+    """End-to-end of the HDF5 reader against synthetic SWATHS and GRIDS files."""
+
+    def _write_fixture(self, path, hdf5_path: str, data: np.ndarray) -> None:
+        import h5py
+
+        with h5py.File(path, "w") as f:
+            grp = f
+            parts = hdf5_path.strip("/").split("/")
+            for part in parts[:-1]:
+                grp = grp.require_group(part)
+            grp.create_dataset(parts[-1], data=data)
+
+    def test_reads_grids_layout(self, tmp_path) -> None:
+        from tanager.masks import _read_mask_field_from_hdf5
+
+        path = tmp_path / "ortho.h5"
+        arr = np.array([[0, 1], [1, 0]], dtype=np.uint8)
+        self._write_fixture(path, "/HDFEOS/GRIDS/HYP/Data Fields/beta_cirrus_mask", arr)
+
+        result = _read_mask_field_from_hdf5(str(path), "beta_cirrus_mask")
+        assert result is not None
+        np.testing.assert_array_equal(result, arr)
+
+    def test_reads_swaths_layout(self, tmp_path) -> None:
+        from tanager.masks import _read_mask_field_from_hdf5
+
+        path = tmp_path / "swath.h5"
+        arr = np.array([[0, 0], [0, 1]], dtype=np.uint8)
+        self._write_fixture(path, "/HDFEOS/SWATHS/HYP/Data Fields/beta_cirrus_mask", arr)
+
+        result = _read_mask_field_from_hdf5(str(path), "beta_cirrus_mask")
+        assert result is not None
+        np.testing.assert_array_equal(result, arr)
+
+    def test_reads_beta_cloud_mask_from_grids(self, tmp_path) -> None:
+        from tanager.masks import _read_mask_field_from_hdf5
+
+        path = tmp_path / "ortho_cloud.h5"
+        arr = np.array([[1, 0], [0, 0]], dtype=np.uint8)
+        self._write_fixture(path, "/HDFEOS/GRIDS/HYP/Data Fields/beta_cloud_mask", arr)
+
+        result = _read_mask_field_from_hdf5(str(path), "beta_cloud_mask")
+        assert result is not None
+        np.testing.assert_array_equal(result, arr)
+
+    def test_returns_none_when_absent(self, tmp_path) -> None:
+        from tanager.masks import _read_mask_field_from_hdf5
+
+        path = tmp_path / "empty.h5"
+        # Stash an unrelated dataset
+        self._write_fixture(path, "/HDFEOS/GRIDS/HYP/Data Fields/some_other_field",
+                            np.zeros((2, 2), dtype=np.uint8))
+
+        result = _read_mask_field_from_hdf5(str(path), "beta_cirrus_mask")
+        assert result is None
+
+
+class TestCloudMaskDataVariableOrCombine:
+    """Data-variable branch also OR-combines cirrus + cloud (LGT-297)."""
+
+    def test_or_combines_when_both_present(self) -> None:
+        ds = make_spectral_dataset(shape=(3, 3))
+        cirrus = np.zeros((3, 3), dtype=np.int8)
+        cirrus[0, 0] = 1
+        cloud = np.zeros((3, 3), dtype=np.int8)
+        cloud[2, 2] = 1
+        ds["beta_cirrus_mask"] = xr.DataArray(cirrus, dims=["y", "x"])
+        ds["beta_cloud_mask"] = xr.DataArray(cloud, dims=["y", "x"])
+
+        result = cloud_mask(ds)
+
+        assert not result.values[0, 0]
+        assert not result.values[2, 2]
+        assert result.values[1, 1]
+
+    def test_only_cloud_variable_present(self) -> None:
+        ds = make_spectral_dataset(shape=(3, 3))
+        cloud = np.zeros((3, 3), dtype=np.int8)
+        cloud[1, 2] = 1
+        ds["beta_cloud_mask"] = xr.DataArray(cloud, dims=["y", "x"])
+
+        result = cloud_mask(ds)
+
+        assert not result.values[1, 2]
+        assert result.values[0, 0]
 
 
 # ---------------------------------------------------------------------------
@@ -469,3 +624,99 @@ class TestTask5CombinedMaskVerification:
         assert np.isnan(result["reflectance"].values[:, 1, 1]).all()
         # Valid pixels are unchanged
         np.testing.assert_allclose(result["reflectance"].values[:, 0, 0], 1.0)
+
+
+# ---------------------------------------------------------------------------
+# LGT-297 — real ortho HDF5 integration test
+# ---------------------------------------------------------------------------
+
+
+_REAL_FIRE_DIR = "data/raw/fire"
+_REAL_FIRE_SCENES = [
+    "20241215_185916_33_4001_ortho_sr_hdf5.h5",
+    "20250123_185507_64_4001_ortho_sr_hdf5.h5",
+    "20250407_192235_24_4001_ortho_sr_hdf5.h5",
+]
+
+
+def _real_fire_scene_paths() -> list[str]:
+    import os
+
+    base = os.path.join(os.getcwd(), _REAL_FIRE_DIR)
+    available = [os.path.join(base, name) for name in _REAL_FIRE_SCENES
+                 if os.path.exists(os.path.join(base, name))]
+    return available
+
+
+@pytest.mark.skipif(
+    not _real_fire_scene_paths(),
+    reason="Real ortho SR HDF5 scenes not present in data/raw/fire/",
+)
+class TestCloudMaskRealOrthoHDF5:
+    """LGT-297: cloud_mask must read masks from real ortho SR HDF5 files.
+
+    These scenes use the GRIDS layout, not SWATHS. Before the fix,
+    _read_beta_cirrus_from_hdf5 silently returned None and cloud_mask
+    fell back to all-True. After the fix, the mask is loaded and at
+    least one of the three real scenes contains non-trivial cloud pixels.
+    """
+
+    def test_reads_masks_from_all_real_scenes(self) -> None:
+        import h5py
+
+        for path in _real_fire_scene_paths():
+            with h5py.File(path, "r") as f:
+                cirrus_path = "/HDFEOS/GRIDS/HYP/Data Fields/beta_cirrus_mask"
+                cloud_path = "/HDFEOS/GRIDS/HYP/Data Fields/beta_cloud_mask"
+                assert cirrus_path in f or cloud_path in f, (
+                    f"Real scene {path} has neither cirrus nor cloud mask"
+                )
+                # Build a minimal dataset shaped to match the mask
+                ref = f[cirrus_path] if cirrus_path in f else f[cloud_path]
+                y_size, x_size = ref.shape
+
+            ds = xr.Dataset(
+                {"reflectance": (["wavelength", "y", "x"],
+                                 np.zeros((1, y_size, x_size), dtype=np.float32))},
+                coords={"wavelength": np.array([500.0])},
+            )
+
+            mask = cloud_mask(ds, filepath=path)
+            assert mask.shape == (y_size, x_size)
+            assert mask.dtype == bool
+
+    def test_real_scene_produces_non_trivial_mask(self) -> None:
+        """At least one real scene must produce a non-all-True (non-trivial) mask.
+
+        The pre-fix bug returned all-True silently. This test guards against
+        regression: if the loader breaks again, every scene becomes all-True.
+        """
+        import h5py
+
+        non_trivial_seen = False
+        for path in _real_fire_scene_paths():
+            with h5py.File(path, "r") as f:
+                cirrus_path = "/HDFEOS/GRIDS/HYP/Data Fields/beta_cirrus_mask"
+                cloud_path = "/HDFEOS/GRIDS/HYP/Data Fields/beta_cloud_mask"
+                ref = f[cirrus_path] if cirrus_path in f else f[cloud_path]
+                y_size, x_size = ref.shape
+
+            ds = xr.Dataset(
+                {"reflectance": (["wavelength", "y", "x"],
+                                 np.zeros((1, y_size, x_size), dtype=np.float32))},
+                coords={"wavelength": np.array([500.0])},
+            )
+
+            mask = cloud_mask(ds, filepath=path)
+            cloudy_count = int((~mask).sum().item())
+            print(
+                f"[LGT-297] {path.split('/')[-1]}: shape={mask.shape}, "
+                f"cloudy_pixels={cloudy_count}/{mask.size}"
+            )
+            if cloudy_count > 0:
+                non_trivial_seen = True
+
+        assert non_trivial_seen, (
+            "All real scenes returned all-True masks — cloud masking is "
+            "silently disabled (LGT-297 regression)."
+        )
