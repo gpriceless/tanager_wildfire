@@ -76,9 +76,7 @@ def select_bands(
             "or wavelengths for nearest-neighbor selection, not both."
         )
     if not range_provided and not nn_provided:
-        raise ValueError(
-            "One of (min_wl, max_wl) or wavelengths must be provided."
-        )
+        raise ValueError("One of (min_wl, max_wl) or wavelengths must be provided.")
 
     if range_provided:
         if min_wl is None or max_wl is None:
@@ -88,9 +86,7 @@ def select_bands(
     return _select_by_nearest(dataset, wavelengths)  # type: ignore[arg-type]
 
 
-def _select_by_range(
-    dataset: xr.Dataset, min_wl: float, max_wl: float
-) -> xr.Dataset:
+def _select_by_range(dataset: xr.Dataset, min_wl: float, max_wl: float) -> xr.Dataset:
     """Return bands in [min_wl, max_wl] using boolean indexing.
 
     Args:
@@ -158,17 +154,13 @@ def _read_good_wavelengths_from_hdf5(
     try:
         import h5py  # heavy dep — imported lazily
     except ImportError as exc:  # pragma: no cover - environment-dependent
-        raise ValueError(
-            "h5py is required to read good_wavelengths from HDF5"
-        ) from exc
+        raise ValueError("h5py is required to read good_wavelengths from HDF5") from exc
 
     path_str = os.fspath(hdf5_filepath)
     try:
         h5 = h5py.File(path_str, "r")
     except OSError as exc:
-        raise ValueError(
-            f"Cannot read Tanager HDF5 file {path_str!r}: {exc}"
-        ) from exc
+        raise ValueError(f"Cannot read Tanager HDF5 file {path_str!r}: {exc}") from exc
 
     with h5:
         if _ORTHO_SR_DATASET_PATH not in h5:
@@ -179,8 +171,7 @@ def _read_good_wavelengths_from_hdf5(
         sr_attrs = dict(h5[_ORTHO_SR_DATASET_PATH].attrs)
         if "good_wavelengths" not in sr_attrs:
             raise ValueError(
-                f"surface_reflectance in {path_str!r} is missing the "
-                f"'good_wavelengths' attribute"
+                f"surface_reflectance in {path_str!r} is missing the 'good_wavelengths' attribute"
             )
         # Sensor convention: 1 = good, 0 = bad.
         return np.asarray(sr_attrs["good_wavelengths"]).astype(bool)
@@ -325,6 +316,22 @@ def _reflectance_var(dataset: xr.Dataset) -> xr.DataArray:
         "Dataset has no reflectance variable; expected one of "
         f"{_REFLECTANCE_VARIABLE_PRIORITY}, got {list(dataset.data_vars)}"
     )
+
+
+def scene_reflectance(scene: Union[xr.Dataset, xr.DataArray]) -> xr.DataArray:
+    """Return the reflectance DataArray for a scene.
+
+    Accepts either a Dataset (resolved via ``attrs['data_var']`` first, then
+    walking :data:`_REFLECTANCE_VARIABLE_PRIORITY`) or a bare DataArray
+    (returned unchanged).  Used by downstream pipelines (lfmc, unmixing) so
+    callers can pass a ``load_ortho_scene`` Dataset without manual variable
+    extraction.
+    """
+    if isinstance(scene, xr.Dataset):
+        return _reflectance_var(scene)
+    if isinstance(scene, xr.DataArray):
+        return scene
+    raise TypeError(f"scene must be xr.Dataset or xr.DataArray, got {type(scene).__name__}")
 
 
 def _normalized_difference(band1: xr.DataArray, band2: xr.DataArray) -> xr.DataArray:
@@ -640,6 +647,119 @@ def _continuum_removal_spectrum(reflectance: np.ndarray, wavelengths: np.ndarray
     return np.minimum(result, 1.0)
 
 
+def _continuum_removal_batched(
+    reflectance: np.ndarray,
+    wavelengths: np.ndarray,
+) -> np.ndarray:
+    """Vectorized upper-hull continuum removal across a batch of pixels.
+
+    Runs Andrew's monotone-chain upper hull simultaneously over P pixels by
+    treating each step of the chain as a numpy operation across the pixel
+    axis. The wavelength axis is shared, so x-comparisons re-use a single
+    sorted array; only the y-values vary per pixel. NaN comparisons evaluate
+    False, so NaN-containing spectra simply skip pops and propagate NaN
+    through interpolation — matching the per-pixel implementation's output.
+
+    Args:
+        reflectance: Array shaped ``(n, P)`` with n wavelength bands and P
+            pixels (any spatial layout flattened by the caller).
+        wavelengths: 1-D array of n centre wavelengths (nm). Need not be
+            sorted; sorted internally.
+
+    Returns:
+        ``(n, P)`` continuum-removed reflectance, clipped to ``<= 1.0``,
+        in the caller's original wavelength order.
+    """
+    n, P = reflectance.shape
+    if n < 3 or P == 0:
+        return np.ones((n, P), dtype=np.float64)
+
+    R_orig = reflectance.astype(np.float64, copy=False)
+
+    # Sort wavelengths ascending so the monotone chain is well-defined; we
+    # restore the caller's order at the end.
+    order = np.argsort(wavelengths)
+    inv_order = np.empty_like(order)
+    inv_order[order] = np.arange(n)
+    wl = wavelengths[order].astype(np.float64)
+    R = R_orig[order]  # (n, P)
+
+    # stack[k, p] is the k-th hull-vertex index (into wl/R) for pixel p.
+    # int32 keeps memory bounded (4 B × n × P) for typical Tanager scenes.
+    stack = np.empty((n, P), dtype=np.int32)
+    sizes = np.zeros(P, dtype=np.int64)
+    p_arange = np.arange(P)
+
+    for i in range(n):
+        x_i = wl[i]
+        y_i = R[i, :]
+
+        # Pop until each pixel's top-two hull vertices form a strict right
+        # turn with the new point, or the stack has fewer than two entries.
+        while True:
+            mask_can_pop = sizes >= 2
+            if not mask_can_pop.any():
+                break
+            top_k = np.maximum(sizes - 1, 0)
+            below_k = np.maximum(sizes - 2, 0)
+            top_pos = stack[top_k, p_arange]
+            below_pos = stack[below_k, p_arange]
+            ox = wl[below_pos]
+            oy = R[below_pos, p_arange]
+            ax = wl[top_pos]
+            ay = R[top_pos, p_arange]
+            cross = (ax - ox) * (y_i - oy) - (ay - oy) * (x_i - ox)
+            pop = mask_can_pop & (cross >= 0.0)
+            if not pop.any():
+                break
+            sizes = np.where(pop, sizes - 1, sizes)
+
+        stack[sizes, p_arange] = i
+        sizes += 1
+
+    # hull_mask[i, p] = True iff i is a hull vertex of pixel p.
+    k_grid = np.arange(n)[:, None]
+    valid = k_grid < sizes[None, :]
+    hull_mask = np.zeros((n, P), dtype=bool)
+    valid_positions = stack[valid]
+    valid_p_idx = np.broadcast_to(p_arange, (n, P))[valid]
+    hull_mask[valid_positions, valid_p_idx] = True
+
+    # For every wavelength i we need the bracketing hull indices:
+    # prev_hull[i, p] = largest hull index <= i (always 0 at i=0 since 0 is
+    # pushed first and never popped).
+    # next_hull[i, p] = smallest hull index >= i (always exists since n-1 is
+    # the last push).
+    i_grid = np.arange(n, dtype=np.int32)[:, None]
+    prev_vals = np.where(hull_mask, i_grid, 0)
+    prev_hull = np.maximum.accumulate(prev_vals, axis=0)
+
+    next_vals = np.where(hull_mask, i_grid, n - 1)
+    next_hull = np.minimum.accumulate(next_vals[::-1], axis=0)[::-1]
+
+    # Linearly interpolate the upper hull onto the full wavelength grid.
+    prev_hull_idx = prev_hull.astype(np.int64, copy=False)
+    next_hull_idx = next_hull.astype(np.int64, copy=False)
+    xp = wl[prev_hull]
+    xn = wl[next_hull]
+    yp = np.take_along_axis(R, prev_hull_idx, axis=0)
+    yn = np.take_along_axis(R, next_hull_idx, axis=0)
+
+    denom = xn - xp
+    denom_safe = np.where(denom == 0, 1.0, denom)
+    t = (wl[:, None] - xp) / denom_safe
+    t = np.where(denom == 0, 0.0, t)
+    continuum_sorted = yp + t * (yn - yp)
+
+    # Restore the caller's wavelength order.
+    continuum = continuum_sorted[inv_order]
+
+    # Avoid division by zero (matches single-spectrum behaviour).
+    continuum_safe = np.where(continuum == 0, np.nan, continuum)
+    result = R_orig / continuum_safe
+    return np.minimum(result, 1.0)
+
+
 def continuum_removal(
     dataset: xr.Dataset,
     wavelength_range: Optional[Tuple[float, float]] = None,
@@ -675,18 +795,48 @@ def continuum_removal(
 
     wavelengths = refl.coords["wavelength"].values.astype(np.float64)
 
-    def _apply_cr(spectrum: np.ndarray) -> np.ndarray:
-        return _continuum_removal_spectrum(spectrum, wavelengths)
+    # Move the wavelength axis to the front, flatten the remaining spatial
+    # axes into a single pixel dimension, run the vectorized hull, then
+    # restore the original layout. This converts the per-pixel Python loop
+    # into a handful of numpy ops per outer-step over (n × P) arrays.
+    refl_t = refl.transpose("wavelength", ...)
+    spatial_dims = [d for d in refl_t.dims if d != "wavelength"]
+    spatial_shape = tuple(refl_t.sizes[d] for d in spatial_dims)
+    arr = refl_t.values
+    n_wl = arr.shape[0]
+    flat = arr.reshape(n_wl, -1)
+    P = flat.shape[1]
 
-    result = xr.apply_ufunc(
-        _apply_cr,
-        refl,
-        input_core_dims=[["wavelength"]],
-        output_core_dims=[["wavelength"]],
-        vectorize=True,
-        dask="parallelized",
-        output_dtypes=[np.float64],
-        dask_gufunc_kwargs={"output_sizes": {"wavelength": len(wavelengths)}},
+    # Process pixels in chunks: the batched core allocates ~15 (n_wl, P_chunk)
+    # arrays during the monotone-chain sweep, so a 426-band, 564K-pixel scene
+    # needs ~28 GB without chunking. 25K pixels keeps each worker's peak
+    # working set near ~1.3 GB and gives enough chunks (~12-25 per scene) to
+    # saturate a multi-core CPU. Chunks are independent (the hull math is
+    # per-pixel), so we parallelise across them with joblib for full-scene
+    # workloads and stay sequential for small inputs to avoid worker overhead.
+    P_chunk = 25_000
+    chunks = [(start, min(start + P_chunk, P)) for start in range(0, P, P_chunk)]
+
+    def _process(start: int, stop: int) -> np.ndarray:
+        return _continuum_removal_batched(flat[:, start:stop], wavelengths)
+
+    if len(chunks) <= 1:
+        cr_flat = _process(*chunks[0]) if chunks else np.empty_like(flat, dtype=np.float64)
+    else:
+        from joblib import Parallel, delayed
+
+        cr_chunks = Parallel(n_jobs=-1, backend="loky")(
+            delayed(_process)(start, stop) for start, stop in chunks
+        )
+        cr_flat = np.concatenate(cr_chunks, axis=1)
+    cr_arr = cr_flat.reshape((n_wl,) + spatial_shape)
+
+    coords = {d: refl_t.coords[d] for d in refl_t.coords if d in refl_t.dims}
+    coords["wavelength"] = refl_t.coords["wavelength"]
+    result = xr.DataArray(
+        cr_arr,
+        dims=("wavelength",) + tuple(spatial_dims),
+        coords=coords,
+        name=refl.name,
     )
-    # apply_ufunc may reorder dims; transpose back to (wavelength, y, x)
-    return result.transpose("wavelength", ...)
+    return result

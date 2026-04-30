@@ -64,6 +64,8 @@ from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple
 import numpy as np
 import xarray as xr
 
+from tanager.spectral import scene_reflectance as _scene_reflectance
+
 logger = logging.getLogger(__name__)
 
 
@@ -169,9 +171,7 @@ def _compute_sai(
             f"reflectance shape {refl.shape} does not match wavelengths shape {wl.shape}"
         )
     if refl.ndim != 1:
-        raise ValueError(
-            f"_compute_sai expects 1-D arrays; got {refl.ndim}-D reflectance"
-        )
+        raise ValueError(f"_compute_sai expects 1-D arrays; got {refl.ndim}-D reflectance")
     if refl.size == 0:
         return 0.0
 
@@ -212,17 +212,6 @@ def _compute_sai(
 # ---------------------------------------------------------------------------
 # Multi-pixel index maps
 # ---------------------------------------------------------------------------
-
-
-def _scene_reflectance(scene: Any) -> xr.DataArray:
-    """Return the reflectance DataArray from either a Dataset or a bare DataArray."""
-    if isinstance(scene, xr.Dataset):
-        if "reflectance" not in scene.data_vars:
-            raise ValueError("scene Dataset must contain a 'reflectance' variable")
-        return scene["reflectance"]
-    if isinstance(scene, xr.DataArray):
-        return scene
-    raise TypeError(f"scene must be xr.Dataset or xr.DataArray, got {type(scene).__name__}")
 
 
 def _sai_map(
@@ -301,10 +290,15 @@ def _continuum_removal_depths(
         wavelength_range=wavelength_range,
     )
 
+    # Drop per-band aux coords (`fwhm`, `good_wavelengths`) along with the
+    # scalar `wavelength`: each `sel(method="nearest")` slice carries the
+    # nearest band's fwhm/good_wavelengths, and those values differ per
+    # target so concat would otherwise raise MergeError.
+    aux_coords = ("wavelength", "fwhm", "good_wavelengths")
     depth_slices = []
     for tgt in target_wls:
         slice_da = (1.0 - cr.sel(wavelength=tgt, method="nearest")).astype(np.float64)
-        depth_slices.append(slice_da.drop_vars("wavelength", errors="ignore"))
+        depth_slices.append(slice_da.drop_vars(aux_coords, errors="ignore"))
     stacked = xr.concat(depth_slices, dim="cr_target")
     stacked = stacked.assign_coords(cr_target=("cr_target", list(map(float, target_wls))))
     return stacked.transpose("cr_target", ...)
@@ -352,6 +346,14 @@ def compute_lfmc_indices(scene: Any) -> xr.Dataset:
 
     if "wavelength" not in refl.coords:
         raise ValueError("scene reflectance must have a 'wavelength' coordinate")
+
+    # Real Tanager DataArrays carry per-band aux coords (`fwhm`,
+    # `good_wavelengths`) along the wavelength dim. Each `sel(method="nearest")`
+    # below grabs the nearest band's aux value — and those differ per pick, so
+    # the resulting variables conflict on `xr.Dataset(...)` construction
+    # (LGT-333). Strip them once up front; they're not meaningful on per-band
+    # selections or on derived index outputs.
+    refl = refl.drop_vars(("fwhm", "good_wavelengths"), errors="ignore")
 
     wl = refl.coords["wavelength"]
     wl_min = float(wl.min())
@@ -506,8 +508,8 @@ def load_globe_lfmc(
     """
     from pathlib import Path
 
-    import pandas as pd
     import geopandas as gpd
+    import pandas as pd
 
     path = Path(data_path)
     if not path.exists():
@@ -548,9 +550,9 @@ def load_globe_lfmc(
 
     if vegetation_types is not None and len(vegetation_types) > 0:
         veg_col = (
-            "vegetation_type" if "vegetation_type" in df.columns else (
-                "species" if "species" in df.columns else None
-            )
+            "vegetation_type"
+            if "vegetation_type" in df.columns
+            else ("species" if "species" in df.columns else None)
         )
         if veg_col is None:
             logger.warning(
@@ -675,9 +677,7 @@ def train_lfmc_plsr(
     if X.ndim != 2:
         raise ValueError(f"spectra must be 2-D (n_samples, n_bands); got {X.ndim}-D")
     if X.shape[0] != y.size:
-        raise ValueError(
-            f"spectra has {X.shape[0]} samples but lfmc_values has {y.size}"
-        )
+        raise ValueError(f"spectra has {X.shape[0]} samples but lfmc_values has {y.size}")
 
     finite_rows = np.all(np.isfinite(X), axis=1) & np.isfinite(y)
     X = X[finite_rows]
@@ -691,9 +691,7 @@ def train_lfmc_plsr(
 
     max_components = min(n_components, n_samples - 1, n_features)
     if max_components < 1:
-        raise ValueError(
-            f"max_components clipped to {max_components}; need at least one component"
-        )
+        raise ValueError(f"max_components clipped to {max_components}; need at least one component")
 
     cv_actual = max(2, min(cv_folds, n_samples))
 
@@ -721,16 +719,10 @@ def train_lfmc_plsr(
             best_n = n
 
     model = PLSRegression(n_components=best_n)
-    r2_cv = float(
-        np.mean(cross_val_score(model, X, y, cv=cv_actual, scoring="r2"))
-    )
+    r2_cv = float(np.mean(cross_val_score(model, X, y, cv=cv_actual, scoring="r2")))
     rmse_cv = float(
         np.sqrt(
-            -np.mean(
-                cross_val_score(
-                    model, X, y, cv=cv_actual, scoring="neg_mean_squared_error"
-                )
-            )
+            -np.mean(cross_val_score(model, X, y, cv=cv_actual, scoring="neg_mean_squared_error"))
         )
     )
     model.fit(X, y)
@@ -812,16 +804,12 @@ def predict_lfmc(
             the model's expected feature count.
     """
     if method != "plsr":
-        raise ValueError(
-            f"unsupported method {method!r}; only 'plsr' is implemented"
-        )
+        raise ValueError(f"unsupported method {method!r}; only 'plsr' is implemented")
 
     if isinstance(model, Mapping):
         estimator = model.get("model")
         if estimator is None:
-            raise ValueError(
-                "model dict must contain a 'model' key with a fitted estimator"
-            )
+            raise ValueError("model dict must contain a 'model' key with a fitted estimator")
         cv_rmse = float(model.get("rmse", 0.0))
     else:
         estimator = model
@@ -829,9 +817,7 @@ def predict_lfmc(
 
     refl = _scene_reflectance(scene)
     if "wavelength" not in refl.dims:
-        raise ValueError(
-            "scene reflectance must have a 'wavelength' dim leading the array"
-        )
+        raise ValueError("scene reflectance must have a 'wavelength' dim leading the array")
     refl = refl.transpose("wavelength", ...)
     nb = refl.sizes["wavelength"]
 

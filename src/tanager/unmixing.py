@@ -55,6 +55,8 @@ from typing import (
 import numpy as np
 import xarray as xr
 
+from tanager.spectral import scene_reflectance as _scene_reflectance
+
 if TYPE_CHECKING:  # pragma: no cover
     from matplotlib.figure import Figure
 
@@ -72,9 +74,7 @@ try:  # pragma: no cover - environment-dependent
 
     _MESMA_AVAILABLE = True
 except Exception:  # broad except: ImportError, but also segfault-style boot errors
-    logger.info(
-        "mesma package not available; run_mesma will fall back to HySUPP/NNLS"
-    )
+    logger.info("mesma package not available; run_mesma will fall back to HySUPP/NNLS")
 
 _HYSUP_AVAILABLE = False
 try:  # pragma: no cover - environment-dependent
@@ -126,7 +126,9 @@ def _resolve_constraints(constraints: Optional[Mapping[str, float]]) -> dict[str
     return merged
 
 
-def _to_mesma_constraints_tuple(c: Mapping[str, float]) -> Tuple[float, float, float, float, float, float, float]:
+def _to_mesma_constraints_tuple(
+    c: Mapping[str, float],
+) -> Tuple[float, float, float, float, float, float, float]:
     """Convert constraint dict into the 7-tuple ``MesmaCore.execute`` expects.
 
     Format (see mesma v1.0.8 source):
@@ -148,15 +150,6 @@ def _to_mesma_constraints_tuple(c: Mapping[str, float]) -> Tuple[float, float, f
 # ---------------------------------------------------------------------------
 # Scene / library wrangling
 # ---------------------------------------------------------------------------
-
-
-def _scene_reflectance(scene: Union[xr.Dataset, xr.DataArray]) -> xr.DataArray:
-    """Return the ``reflectance`` DataArray from a scene Dataset or pass-through DataArray."""
-    if isinstance(scene, xr.Dataset):
-        if "reflectance" not in scene.data_vars:
-            raise ValueError("scene Dataset must contain a 'reflectance' variable")
-        return scene["reflectance"]
-    return scene
 
 
 def _align_to_library_grid(
@@ -264,9 +257,7 @@ def select_bands_uszu(
     lib_wl = np.asarray(library.coords["wavelength"].values, dtype=np.float64)
     n_total = lib_wl.size
     if n_bands > n_total:
-        raise ValueError(
-            f"n_bands ({n_bands}) exceeds available library bands ({n_total})"
-        )
+        raise ValueError(f"n_bands ({n_bands}) exceeds available library bands ({n_total})")
 
     cats = np.asarray(library.coords["category"].values, dtype=str)
     spectra = np.asarray(library.values, dtype=np.float64)  # (n_em, n_bands)
@@ -390,9 +381,7 @@ def _validate_fraction_output(ds: xr.Dataset) -> None:
         raise ValueError("output Dataset missing 'rmse' variable")
     for var in (*_CANONICAL_FRACTIONS, "rmse"):
         if ds[var].dims != ("y", "x"):
-            raise ValueError(
-                f"variable {var!r} has dims {ds[var].dims}, expected ('y', 'x')"
-            )
+            raise ValueError(f"variable {var!r} has dims {ds[var].dims}, expected ('y', 'x')")
 
 
 # ---------------------------------------------------------------------------
@@ -728,14 +717,10 @@ def run_mesma(
             refl_arr, library_arr, per_em_classes, em_per_class, constraints_tuple
         )
     except Exception as exc:
-        logger.warning(
-            "mesma backend raised %s — falling back to FCLS/NNLS", exc
-        )
+        logger.warning("mesma backend raised %s — falling back to FCLS/NNLS", exc)
         return _run_mesma_hysup_fallback(scene, library, constraints_resolved)
 
-    fractions_by_class, rmse_map = _mesma_fractions_to_dict(
-        fractions, rmse_map, class_list
-    )
+    fractions_by_class, rmse_map = _mesma_fractions_to_dict(fractions, rmse_map, class_list)
     fractions_by_class, rmse_map = _apply_post_constraints(
         fractions_by_class, rmse_map, constraints_resolved
     )
@@ -783,11 +768,7 @@ def normalize_fractions(
 
     shade = fractions["shade"]
     other_vars = [v for v in _CANONICAL_FRACTIONS if v != "shade" and v in fractions]
-    extras = [
-        v
-        for v in fractions.data_vars
-        if v not in _CANONICAL_FRACTIONS and v != "rmse"
-    ]
+    extras = [v for v in fractions.data_vars if v not in _CANONICAL_FRACTIONS and v != "rmse"]
     keep_vars = other_vars + extras
 
     denom = (1.0 - shade).astype(np.float32)

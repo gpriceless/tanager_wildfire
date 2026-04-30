@@ -271,11 +271,6 @@ def stage_lfmc_indices(scene: xr.Dataset, scene_id: str, out_dir: Path,
     """
     primary = scene.attrs.get("data_var") or "surface_reflectance"
     refl = scene[primary]
-    # Drop wavelength-aligned aux coords (fwhm, good_wavelengths). The LFMC
-    # CR_depths step concatenates per-wavelength slices and these per-band
-    # coords cause "conflicting values for variable 'fwhm'" failures during
-    # concat because each slice's nearest band has different aux values.
-    refl = refl.drop_vars(("fwhm", "good_wavelengths"), errors="ignore")
     ny, nx = int(refl.sizes["y"]), int(refl.sizes["x"])
     y0 = max(0, ny // 2 - crop // 2)
     x0 = max(0, nx // 2 - crop // 2)

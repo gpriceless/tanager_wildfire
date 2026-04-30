@@ -23,13 +23,11 @@ import numpy as np
 import pytest
 import xarray as xr
 
-
 pytest.importorskip("sklearn")
 pytest.importorskip("pandas")
 
 from tanager import lfmc
 from tanager.lfmc import _compute_sai, compute_lfmc_indices, predict_lfmc, train_lfmc_plsr
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -97,7 +95,11 @@ class TestComputeSAI:
         wl = np.linspace(900.0, 1300.0, 200)
         spec = _spectrum_with_absorption(wl, feature_centre=1200.0, depth=0.20)
         sai = _compute_sai(
-            spec, wl, target_wl=1200.0, left_shoulder=1300.0, right_shoulder=1100.0,
+            spec,
+            wl,
+            target_wl=1200.0,
+            left_shoulder=1300.0,
+            right_shoulder=1100.0,
         )
         assert sai == 0.0
 
@@ -145,6 +147,45 @@ class TestComputeLFMCIndices:
             finite = arr[np.isfinite(arr)]
             assert finite.min() >= -1.0 - 1e-6
             assert finite.max() <= 1.0 + 1e-6
+
+    def test_succeeds_with_per_band_fwhm_and_good_wavelengths_coords(self):
+        # Regression for LGT-333: real Tanager DataArrays carry per-band
+        # `fwhm` and `good_wavelengths` aux coords along the wavelength dim;
+        # CR_depths construction used to raise MergeError because each
+        # `sel(method="nearest")` slice carried a different aux value.
+        wl = np.linspace(380.0, 2500.0, 426).astype(np.float32)
+        scene = _make_cube(wl, self._full_spectrum(wl))
+        rng = np.random.default_rng(0)
+        scene = scene.assign_coords(
+            fwhm=("wavelength", rng.uniform(4.0, 12.0, size=wl.size).astype(np.float32)),
+            good_wavelengths=("wavelength", np.ones(wl.size, dtype=bool)),
+        )
+        # DataArray entry point — also surfaces the bug since
+        # `_scene_reflectance` preserves the wavelength-aligned coords.
+        indices = compute_lfmc_indices(scene["reflectance"])
+        assert "CR_depths" in indices.data_vars
+        assert indices["CR_depths"].dims == ("cr_target", "y", "x")
+        # Aux coords must not leak onto the CR_depths output.
+        assert "fwhm" not in indices["CR_depths"].coords
+        assert "good_wavelengths" not in indices["CR_depths"].coords
+
+    def test_accepts_surface_reflectance_variable_name(self):
+        # Regression for LGT-332: load_ortho_scene names the cube
+        # `surface_reflectance`. compute_lfmc_indices must resolve it via
+        # the shared scene_reflectance helper instead of demanding the
+        # synthetic `reflectance` name.
+        wl = np.linspace(380.0, 2500.0, 426).astype(np.float32)
+        spec = self._full_spectrum(wl)
+        cube = np.broadcast_to(spec[:, None, None], (spec.size, 4, 4)).astype(np.float32)
+        scene = xr.Dataset(
+            {"surface_reflectance": (["wavelength", "y", "x"], cube.copy())},
+            coords={"wavelength": wl, "y": np.arange(4), "x": np.arange(4)},
+            attrs={"data_var": "surface_reflectance"},
+        )
+        indices = compute_lfmc_indices(scene)
+        assert "CR_depths" in indices.data_vars
+        assert "SAI970" in indices.data_vars
+        assert indices["CR_depths"].dims == ("cr_target", "y", "x")
 
 
 # ---------------------------------------------------------------------------
@@ -214,9 +255,9 @@ class TestPredictLFMC:
 
         # Build a scene Dataset matching the training band grid.
         ny, nx = 4, 4
-        cube = np.broadcast_to(
-            spectra[0][:, None, None], (wl.size, ny, nx)
-        ).astype(np.float32).copy()
+        cube = (
+            np.broadcast_to(spectra[0][:, None, None], (wl.size, ny, nx)).astype(np.float32).copy()
+        )
         scene = xr.Dataset(
             {"reflectance": (["wavelength", "y", "x"], cube)},
             coords={"wavelength": wl.astype(np.float32), "y": np.arange(ny), "x": np.arange(nx)},
