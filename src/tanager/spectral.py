@@ -761,7 +761,7 @@ def _continuum_removal_batched(
 
 
 def continuum_removal(
-    dataset: xr.Dataset,
+    dataset: Union[xr.Dataset, xr.DataArray],
     wavelength_range: Optional[Tuple[float, float]] = None,
 ) -> xr.DataArray:
     """Apply convex hull continuum removal to every pixel spectrum.
@@ -785,7 +785,7 @@ def continuum_removal(
         dimensions (wavelength, y, x).  The wavelength coordinate reflects the
         selected range if ``wavelength_range`` was specified.
     """
-    refl = dataset["reflectance"]
+    refl = _reflectance_var(dataset) if isinstance(dataset, xr.Dataset) else dataset
 
     if wavelength_range is not None:
         min_wl, max_wl = wavelength_range
