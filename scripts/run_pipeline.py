@@ -40,6 +40,8 @@ from tanager.io import load_ortho_scene, get_spatial_info, reproject_to_common_g
 from tanager.spectral import nbr, ndvi, ndwi, dnbr, clamp_reflectance
 from tanager.masks import nodata_mask, cloud_mask, water_mask, apply_masks
 from tanager.lfmc import compute_lfmc_indices
+from tanager.config import EMIT_SENSOR, PRISMA_SENSOR, SENTINEL2_BANDS
+from tanager.validation import simulate_sensor, compare_sensors
 
 logging.basicConfig(
     level=logging.INFO,
@@ -491,6 +493,122 @@ def stage_dnbr(pre: xr.Dataset, post: xr.Dataset, label: str, out_dir: Path) -> 
 
 
 # ---------------------------------------------------------------------------
+# Sensor cross-comparison: spectral degradation simulation
+# ---------------------------------------------------------------------------
+
+
+# Center crop in pixels used by stage_sensor_comparison. SPy BandResampler
+# iterates per-pixel inside simulate_sensor(), so we bound the grid to keep
+# heartbeat runtime predictable. 128 px gives 16 384 sample points — enough
+# for stable R²/RMSE while remaining well under the LFMC stage budget.
+_SENSOR_COMPARISON_CROP_PX: int = 128
+
+
+def _build_sensor_specs() -> list[tuple[str, np.ndarray, Any]]:
+    """Return (sensor_name, target_centers, target_fwhm) per reference sensor."""
+    emit_centers = np.linspace(
+        float(EMIT_SENSOR.wavelength_min_nm),
+        float(EMIT_SENSOR.wavelength_max_nm),
+        int(EMIT_SENSOR.n_bands),
+    )
+    prisma_centers = np.linspace(
+        float(PRISMA_SENSOR.wavelength_min_nm),
+        float(PRISMA_SENSOR.wavelength_max_nm),
+        int(PRISMA_SENSOR.n_bands),
+    )
+    s2_centers = np.asarray(
+        [b["center_nm"] for b in SENTINEL2_BANDS.values()], dtype=np.float64,
+    )
+    s2_fwhm = np.asarray(
+        [b["fwhm_nm"] for b in SENTINEL2_BANDS.values()], dtype=np.float64,
+    )
+    return [
+        ("EMIT", emit_centers, float(EMIT_SENSOR.fwhm_nm)),
+        ("PRISMA", prisma_centers, float(PRISMA_SENSOR.fwhm_nm)),
+        ("Sentinel-2", s2_centers, s2_fwhm),
+    ]
+
+
+def _center_crop_scene(scene: xr.Dataset, crop: int) -> xr.Dataset:
+    """Return a center-cropped copy of ``scene`` if larger than ``crop`` per axis."""
+    ny, nx = int(scene.sizes["y"]), int(scene.sizes["x"])
+    if ny <= crop and nx <= crop:
+        return scene
+    y0 = max(0, ny // 2 - crop // 2)
+    x0 = max(0, nx // 2 - crop // 2)
+    log.info(
+        "sensor_comparison: cropped to y=[%d,%d), x=[%d,%d)",
+        y0, y0 + crop, x0, x0 + crop,
+    )
+    return scene.isel(y=slice(y0, y0 + crop), x=slice(x0, x0 + crop))
+
+
+@_stage("sensor_comparison")
+def stage_sensor_comparison(scene: xr.Dataset, scene_id: str, out_dir: Path,
+                            crop: int = _SENSOR_COMPARISON_CROP_PX,
+                            ) -> tuple[str, list[Path]]:
+    """Quantify Tanager-1's spectral advantage over EMIT, PRISMA, and Sentinel-2.
+
+    For each reference sensor we spectrally degrade the Tanager cube into the
+    target sensor's band centres + FWHM via :func:`tanager.simulate_sensor`,
+    recompute NBR on the simulated scene, and use the native Tanager NBR as
+    the ground-truth reference. ``compare_sensors`` then yields R² / RMSE for
+    Tanager (trivially perfect against itself) and the simulated reference,
+    plus the percentage RMSE reduction Tanager delivers — the headline +5
+    competition tie-breaker number.
+
+    The simulation iterates per-pixel inside ``BandResampler``, so the scene
+    is center-cropped (``crop=128`` by default) to keep runtime bounded.
+    """
+    import csv
+
+    cropped = _center_crop_scene(scene, crop)
+    tanager_nbr = nbr(cropped)
+
+    rows: list[dict[str, Any]] = []
+    detail_lines: list[str] = []
+    for sensor_name, centers, fwhm in _build_sensor_specs():
+        simulated = simulate_sensor(cropped, centers, fwhm, sensor_name)
+        sim_nbr = nbr(simulated)
+        comparison = compare_sensors(
+            tanager_nbr, sim_nbr,
+            ground_truth=tanager_nbr,
+            sensor_name=sensor_name,
+        )
+        tan = comparison["tanager_metrics"]
+        ref = comparison["reference_metrics"]
+        improvements = comparison["improvement_ratios"]
+        rows.append({
+            "sensor_name": sensor_name,
+            "tanager_r2": float(tan["r2"]),
+            "reference_r2": float(ref["r2"]),
+            "rmse_reduction_pct": float(improvements["rmse_reduction_pct"]),
+        })
+        detail_lines.append(
+            f"{sensor_name}: ref_r2={ref['r2']:+.3f} ref_rmse={ref['rmse']:.4f} "
+            f"rmse_red={improvements['rmse_reduction_pct']:+.1f}% "
+            f"n_valid={ref['n_valid']}"
+        )
+
+    csv_path = out_dir / f"{scene_id}_sensor_comparison.csv"
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = ["sensor_name", "tanager_r2", "reference_r2", "rmse_reduction_pct"]
+    with csv_path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({
+                "sensor_name": row["sensor_name"],
+                "tanager_r2": f"{row['tanager_r2']:.6f}",
+                "reference_r2": f"{row['reference_r2']:.6f}",
+                "rmse_reduction_pct": f"{row['rmse_reduction_pct']:.4f}",
+            })
+
+    detail = "; ".join(detail_lines)
+    return detail, [csv_path]
+
+
+# ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
 
@@ -518,6 +636,9 @@ def process_scene(scene_id: str, filepath: Path, out_dir: Path,
 
     lfmc_stage = stage_lfmc_indices(masked, scene_id, out_dir)
     report.stages.append(lfmc_stage)
+
+    sensor_stage = stage_sensor_comparison(masked, scene_id, out_dir)
+    report.stages.append(sensor_stage)
 
     if do_mesma:
         mesma_stage = stage_mesma_image(masked, scene_id, out_dir)
