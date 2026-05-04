@@ -57,7 +57,12 @@ OUT_DIR = REPO_ROOT / "outputs"
 
 SCENES = {
     "20241215": DATA_DIR / "20241215_185916_33_4001_ortho_sr_hdf5.h5",
-    "20250123": DATA_DIR / "20250123_185507_64_4001_ortho_sr_hdf5.h5",
+    # Two Jan 23 swaths from the same overpass (~11 s apart).  Swath 1 (185507)
+    # captures the Hughes fire (~34.5 °N) and has no overlap with the 20241215
+    # pre-fire scene; swath 2 (185518) lies ~80 km further along-track and
+    # overlaps the Dec 15 pre-fire footprint over the Palisades fire area.
+    "20250123_swath1": DATA_DIR / "20250123_185507_64_4001_ortho_sr_hdf5.h5",
+    "20250123_swath2": DATA_DIR / "20250123_185518_92_4001_ortho_sr_hdf5.h5",
     "20250407": DATA_DIR / "20250407_192235_24_4001_ortho_sr_hdf5.h5",
 }
 
@@ -657,9 +662,15 @@ def write_report(scene_reports: list[SceneReport], multi_stages: list[StageResul
         "by `tanager.spectral` for consistency."
     )
     lines.append(
-        "- **Three scenes, two locations.** 20241215 sits ~60 km south of "
-        "20250123/20250407, so no dNBR is computed against it. The 20250123 → "
-        "20250407 pair overlaps and is used for dNBR."
+        "- **Two distinct fire footprints captured.** 20241215 (pre-fire) and "
+        "20250123 swath 2 cover the Palisades fire area (~34.0 °N); 20250123 "
+        "swath 1 and 20250407 cover the Hughes fire area (~34.5 °N). The two "
+        "regions are separated by ~30 km of UTM northing with zero overlap. "
+        "The headline burn-severity dNBR uses the 20241215 → 20250123 swath 2 "
+        "pair (434 km² overlap, 85.6 % of the pre-fire scene). The 20250123 "
+        "swath 1 → 20250407 pair is post→post (recovery, not severity) and is "
+        "labelled accordingly. Tanager has no pre-fire scene over the Hughes "
+        "fire footprint; that gap is data-sourcing, not pipeline."
     )
 
     out_path.write_text("\n".join(lines))
@@ -678,32 +689,44 @@ def main() -> int:
 
     # Single-scene path: run on every scene, but only do the heavier MESMA +
     # severity stage on the smallest one (20241215) to keep the run bounded.
-    for scene_id in ("20241215", "20250123", "20250407"):
+    for scene_id in ("20241215", "20250123_swath1", "20250123_swath2", "20250407"):
         do_mesma = scene_id == "20241215"
         do_sev = do_mesma
         report = process_scene(scene_id, SCENES[scene_id], OUT_DIR, do_mesma=do_mesma,
                                 do_severity=do_sev)
         scene_reports.append(report)
 
-    # Multi-scene: dNBR for the overlapping pair.
+    # Multi-scene: two dNBR products.
+    #   1. Headline burn severity: 20241215 (pre-fire) → 20250123 swath 2
+    #      (post-fire).  Overlap = 434 km² (85.6 % of the pre-fire scene),
+    #      covers the Palisades fire area.  This is the scientifically valid
+    #      pre→post pair.
+    #   2. Vegetation recovery: 20250123 swath 1 (post-fire) → 20250407 (early
+    #      recovery).  Both scenes are post-fire over the Hughes fire area, so
+    #      the resulting "dNBR" is a recovery / regrowth signal, NOT burn
+    #      severity.  Documented as such in the report.
     multi_stages: list[StageResult] = []
-    try:
-        log.info("=== loading 20250123 (pre) and 20250407 (post) for dNBR ===")
-        pre = load_ortho_scene(SCENES["20250123"])
-        post = load_ortho_scene(SCENES["20250407"])
-        # Subset to the bands needed by NBR (~700-900 NIR and ~2200 SWIR2) to
-        # avoid the full 426-band reproject. dnbr internally does .sel(method="nearest")
-        # for those wavelengths, so a band subset reduces the reproject cost.
-        pre_nbr = pre.sel(wavelength=[860.0, 2200.0], method="nearest")
-        post_nbr = post.sel(wavelength=[860.0, 2200.0], method="nearest")
-        multi_stages.append(stage_dnbr(pre_nbr, post_nbr, "20250123_to_20250407", OUT_DIR))
-        del pre, post, pre_nbr, post_nbr
-        gc.collect()
-    except Exception as exc:
-        multi_stages.append(StageResult(
-            name="dnbr", status="error",
-            detail=f"{exc.__class__.__name__}: {exc}\n{traceback.format_exc(limit=3)}",
-        ))
+    for label, pre_key, post_key, kind in (
+        ("20241215_to_20250123swath2", "20241215", "20250123_swath2", "burn-severity"),
+        ("20250123swath1_to_20250407", "20250123_swath1", "20250407", "recovery (post→post)"),
+    ):
+        try:
+            log.info("=== loading %s (pre=%s, post=%s, kind=%s) ===",
+                     label, pre_key, post_key, kind)
+            pre = load_ortho_scene(SCENES[pre_key])
+            post = load_ortho_scene(SCENES[post_key])
+            # Subset to NBR-relevant bands (~860 nm NIR and ~2200 nm SWIR2) so
+            # the reproject only touches two bands instead of 426.
+            pre_nbr = pre.sel(wavelength=[860.0, 2200.0], method="nearest")
+            post_nbr = post.sel(wavelength=[860.0, 2200.0], method="nearest")
+            multi_stages.append(stage_dnbr(pre_nbr, post_nbr, label, OUT_DIR))
+            del pre, post, pre_nbr, post_nbr
+            gc.collect()
+        except Exception as exc:
+            multi_stages.append(StageResult(
+                name=f"dnbr_{label}", status="error",
+                detail=f"{exc.__class__.__name__}: {exc}\n{traceback.format_exc(limit=3)}",
+            ))
 
     write_report(scene_reports, multi_stages, OUT_DIR / "pipeline_report.md")
     log.info("done")
