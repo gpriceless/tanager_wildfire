@@ -74,12 +74,15 @@ class TestComputeSAI:
         assert 0.1 < sai <= 1.0
 
     def test_flat_spectrum_yields_zero(self):
+        # A perfectly flat spectrum is a valid measurement of "no absorption"
+        # (R_target == R_continuum), not a masked/invalid pixel. SAI = 0.0
+        # is the genuine answer here and must NOT be replaced with NaN.
         wl = np.linspace(900.0, 1300.0, 200)
         spec = np.full_like(wl, 0.45, dtype=np.float32)
         sai = _compute_sai(spec, wl, target_wl=1200.0, left_shoulder=1100.0, right_shoulder=1300.0)
         assert sai == 0.0
 
-    def test_shoulders_outside_window_yield_zero(self):
+    def test_shoulders_outside_window_yield_nan(self):
         wl = np.linspace(900.0, 1300.0, 200)
         spec = _spectrum_with_absorption(wl, feature_centre=1200.0, depth=0.20)
         sai = _compute_sai(
@@ -89,9 +92,9 @@ class TestComputeSAI:
             left_shoulder=500.0,  # outside window
             right_shoulder=2000.0,  # outside window
         )
-        assert sai == 0.0
+        assert np.isnan(sai)
 
-    def test_inverted_shoulders_yield_zero(self):
+    def test_inverted_shoulders_yield_nan(self):
         wl = np.linspace(900.0, 1300.0, 200)
         spec = _spectrum_with_absorption(wl, feature_centre=1200.0, depth=0.20)
         sai = _compute_sai(
@@ -101,14 +104,91 @@ class TestComputeSAI:
             left_shoulder=1300.0,
             right_shoulder=1100.0,
         )
-        assert sai == 0.0
+        assert np.isnan(sai)
 
-    def test_nan_reflectance_yields_zero(self):
+    def test_nan_reflectance_yields_nan(self):
         wl = np.linspace(900.0, 1300.0, 200)
         spec = _spectrum_with_absorption(wl, feature_centre=1200.0, depth=0.20)
         spec[100] = np.nan  # corrupt the target band
         sai = _compute_sai(spec, wl, target_wl=wl[100], left_shoulder=1100.0, right_shoulder=1300.0)
-        assert sai == 0.0
+        assert np.isnan(sai)
+
+
+# ---------------------------------------------------------------------------
+# _sai_map — masked-pixel propagation (regression for "100% valid SAI" bug)
+# ---------------------------------------------------------------------------
+
+
+class TestSAIMapMaskedPixels:
+    """Regression: SAI used to fill masked pixels with 0.0, silently inflating
+    "valid pixel" coverage to 100% while NDWI/WI/CR reported the true ~28%.
+    Now masked / non-physical pixels must propagate as NaN.
+    """
+
+    def _cube_with_nan_pixels(self, wl: np.ndarray, mask_fraction: float = 0.5) -> xr.DataArray:
+        spec = np.full_like(wl, 0.45, dtype=np.float32)
+        for centre in (970.0, 1200.0, 1660.0):
+            spec -= 0.15 * np.exp(-((wl - centre) ** 2) / (2.0 * 40.0**2))
+        ny, nx = 4, 4
+        cube = np.broadcast_to(spec[:, None, None], (spec.size, ny, nx)).astype(np.float32).copy()
+        # Mask roughly mask_fraction of pixels by setting their entire spectrum to NaN.
+        rng = np.random.default_rng(0)
+        flat_idx = rng.choice(ny * nx, size=int(mask_fraction * ny * nx), replace=False)
+        for k in flat_idx:
+            iy, ix = divmod(int(k), nx)
+            cube[:, iy, ix] = np.nan
+        return xr.DataArray(
+            cube,
+            dims=("wavelength", "y", "x"),
+            coords={"wavelength": wl, "y": np.arange(ny), "x": np.arange(nx)},
+        )
+
+    def test_masked_pixels_yield_nan_not_zero(self):
+        from tanager.lfmc import _sai_map
+
+        wl = np.linspace(380.0, 2500.0, 426).astype(np.float32)
+        refl = self._cube_with_nan_pixels(wl, mask_fraction=0.5)
+        sai = _sai_map(refl, target_wl=1200.0, left_shoulder=1100.0, right_shoulder=1300.0)
+
+        assert np.isnan(sai.values).any(), "masked pixels must propagate as NaN, not 0"
+        n_total = sai.size
+        n_finite = int(np.isfinite(sai.values).sum())
+        assert n_finite < n_total, (
+            f"_sai_map reports 100% valid pixels ({n_finite}/{n_total}) — "
+            "masked pixels are leaking through as zeros instead of NaN"
+        )
+
+    def test_continuum_nonpositive_yields_nan(self):
+        from tanager.lfmc import _sai_map
+
+        # Reflectance that drives the linearly-interpolated continuum to <= 0
+        # (negative shoulder values from e.g. ISOFIT shadow artefacts).
+        wl = np.linspace(380.0, 2500.0, 426).astype(np.float32)
+        spec = np.full_like(wl, -0.1, dtype=np.float32)
+        ny, nx = 2, 2
+        cube = np.broadcast_to(spec[:, None, None], (spec.size, ny, nx)).astype(np.float32).copy()
+        refl = xr.DataArray(
+            cube,
+            dims=("wavelength", "y", "x"),
+            coords={"wavelength": wl, "y": np.arange(ny), "x": np.arange(nx)},
+        )
+        sai = _sai_map(refl, target_wl=1200.0, left_shoulder=1100.0, right_shoulder=1300.0)
+        assert np.isnan(sai.values).all()
+
+    def test_target_outside_shoulders_yields_all_nan_map(self):
+        from tanager.lfmc import _sai_map
+
+        # Misconfigured wavelengths (target not bracketed) — whole-map invalid.
+        wl = np.linspace(380.0, 2500.0, 426).astype(np.float32)
+        spec = np.full_like(wl, 0.45, dtype=np.float32)
+        cube = np.broadcast_to(spec[:, None, None], (spec.size, 3, 3)).astype(np.float32).copy()
+        refl = xr.DataArray(
+            cube,
+            dims=("wavelength", "y", "x"),
+            coords={"wavelength": wl, "y": np.arange(3), "x": np.arange(3)},
+        )
+        sai = _sai_map(refl, target_wl=900.0, left_shoulder=1100.0, right_shoulder=1300.0)
+        assert np.isnan(sai.values).all()
 
 
 # ---------------------------------------------------------------------------

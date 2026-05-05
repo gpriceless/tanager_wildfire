@@ -149,16 +149,19 @@ def _compute_sai(
         right_shoulder: Approximate wavelength of the right continuum anchor (nm).
 
     Returns:
-        SAI value in ``[0, 1]``. Returns ``0.0`` when the feature cannot be
-        evaluated:
+        SAI value in ``[0, 1]``. Returns ``NaN`` when the feature cannot be
+        evaluated, so masked / invalid pixels do not silently inflate
+        downstream "valid pixel" coverage statistics:
 
         * shoulders do not bracket the target (``left < target < right`` violated),
         * any of the target / shoulder wavelengths fall outside the supplied
           spectrum's range,
         * any of the three reflectance values is NaN,
         * the linearly-interpolated continuum is non-positive,
-        * the measured reflectance at the target equals or exceeds the
-          continuum (no absorption detected).
+        * the resulting SAI value itself is non-finite.
+
+        A genuine flat spectrum (``R_target == R_continuum``) still returns
+        ``0.0`` — that is a valid measurement of "no absorption", not a mask.
 
     Raises:
         ValueError: If ``reflectance`` and ``wavelengths`` have different shapes.
@@ -173,15 +176,15 @@ def _compute_sai(
     if refl.ndim != 1:
         raise ValueError(f"_compute_sai expects 1-D arrays; got {refl.ndim}-D reflectance")
     if refl.size == 0:
-        return 0.0
+        return float("nan")
 
     if not (left_shoulder < target_wl < right_shoulder):
-        return 0.0
+        return float("nan")
 
     wl_min = float(wl.min())
     wl_max = float(wl.max())
     if left_shoulder < wl_min or right_shoulder > wl_max:
-        return 0.0
+        return float("nan")
 
     idx_target = int(np.argmin(np.abs(wl - target_wl)))
     idx_left = int(np.argmin(np.abs(wl - left_shoulder)))
@@ -191,21 +194,21 @@ def _compute_sai(
     r_left = float(refl[idx_left])
     r_right = float(refl[idx_right])
     if not (np.isfinite(r_target) and np.isfinite(r_left) and np.isfinite(r_right)):
-        return 0.0
+        return float("nan")
 
     wl_left = float(wl[idx_left])
     wl_right = float(wl[idx_right])
     wl_target = float(wl[idx_target])
     if wl_right == wl_left:
-        return 0.0
+        return float("nan")
 
     continuum = r_left + (r_right - r_left) * (wl_target - wl_left) / (wl_right - wl_left)
     if continuum <= 0.0:
-        return 0.0
+        return float("nan")
 
     sai = (continuum - r_target) / continuum
     if not np.isfinite(sai):
-        return 0.0
+        return float("nan")
     return float(np.clip(sai, 0.0, 1.0))
 
 
@@ -225,19 +228,20 @@ def _sai_map(
     The math is identical to :func:`_compute_sai`; the implementation skips
     the per-pixel Python loop by selecting the three relevant bands once
     and operating on the resulting ``(y, x)`` arrays. All edge-case guards
-    that drive ``_compute_sai`` to ``0.0`` produce the same per-pixel value
-    here (zero-valued cells in the output map).
+    that drive ``_compute_sai`` to ``NaN`` produce the same per-pixel value
+    here (NaN-filled cells in the output map), so masked / invalid pixels
+    do not silently inflate "valid pixel" coverage statistics.
     """
     if not (left_shoulder < target_wl < right_shoulder):
         template = reflectance.isel(wavelength=0, drop=True)
-        return xr.zeros_like(template, dtype=np.float64)
+        return xr.full_like(template, np.nan, dtype=np.float64)
 
     wl_axis = reflectance.coords["wavelength"]
     wl_min = float(wl_axis.min())
     wl_max = float(wl_axis.max())
     if left_shoulder < wl_min or right_shoulder > wl_max:
         template = reflectance.isel(wavelength=0, drop=True)
-        return xr.zeros_like(template, dtype=np.float64)
+        return xr.full_like(template, np.nan, dtype=np.float64)
 
     r_target = reflectance.sel(wavelength=target_wl, method="nearest").astype(np.float64)
     r_left = reflectance.sel(wavelength=left_shoulder, method="nearest").astype(np.float64)
@@ -247,7 +251,7 @@ def _sai_map(
     wl_left = float(r_left.coords["wavelength"].values)
     wl_right = float(r_right.coords["wavelength"].values)
     if wl_right == wl_left:
-        return xr.zeros_like(r_target, dtype=np.float64)
+        return xr.full_like(r_target, np.nan, dtype=np.float64)
 
     # Drop the residual wavelength scalar coords so the arithmetic broadcasts
     # over (y, x) without alignment churn.
@@ -257,9 +261,10 @@ def _sai_map(
 
     continuum = r_left + (r_right - r_left) * (wl_target - wl_left) / (wl_right - wl_left)
     raw_sai = (continuum - r_target) / continuum
-    # Replicate _compute_sai's guards element-wise.
-    sai = xr.where(continuum <= 0.0, 0.0, raw_sai)
-    sai = xr.where(np.isfinite(sai), sai, 0.0)
+    # Replicate _compute_sai's guards element-wise — NaN, not zero, marks
+    # masked or non-physical pixels.
+    sai = xr.where(continuum <= 0.0, np.nan, raw_sai)
+    sai = xr.where(np.isfinite(sai), sai, np.nan)
     return sai.clip(0.0, 1.0).rename(None)
 
 
