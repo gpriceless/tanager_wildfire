@@ -756,8 +756,10 @@ def normalize_fractions(
 
     Returns:
         New Dataset. If ``remove_shade`` was True, the shade variable is
-        absent and the remaining canonical fractions sum to ~1.0 per pixel.
-        Pixels with shade==1.0 (fully shaded) become NaN.
+        absent and the remaining canonical fractions are clamped to ``[0, 1]``
+        and re-normalized to sum to ~1.0 per pixel. Pixels with shade==1.0
+        (fully shaded) or whose post-clamp canonical fractions all collapse
+        to zero become NaN.
 
     Raises:
         ValueError: If the input is missing the canonical fraction variables.
@@ -769,15 +771,29 @@ def normalize_fractions(
     shade = fractions["shade"]
     other_vars = [v for v in _CANONICAL_FRACTIONS if v != "shade" and v in fractions]
     extras = [v for v in fractions.data_vars if v not in _CANONICAL_FRACTIONS and v != "rmse"]
-    keep_vars = other_vars + extras
 
     denom = (1.0 - shade).astype(np.float32)
     safe_denom = xr.where(np.abs(denom) > 1e-6, denom, np.nan)
 
+    # The MESMA solver uses tolerant constraints (min_fraction=-0.05,
+    # max_fraction=1.05); shade rescaling amplifies these residuals further,
+    # so post-rescale fractions can fall outside [0, 1]. Clamp each canonical
+    # fraction to [0, 1] then re-normalize so they still sum to 1.0.
+    clamped_canonical = {
+        var: (fractions[var] / safe_denom).astype(np.float32).clip(0.0, 1.0)
+        for var in other_vars
+    }
+
     out = xr.Dataset()
-    for var in keep_vars:
-        rescaled = (fractions[var] / safe_denom).astype(np.float32)
-        out[var] = rescaled
+    if clamped_canonical:
+        total = sum(clamped_canonical.values())
+        safe_total = xr.where(total > 1e-6, total, np.nan)
+        for var, val in clamped_canonical.items():
+            out[var] = (val / safe_total).astype(np.float32)
+
+    for var in extras:
+        out[var] = (fractions[var] / safe_denom).astype(np.float32)
+
     if "rmse" in fractions:
         out["rmse"] = fractions["rmse"]
     out.attrs.update(fractions.attrs)

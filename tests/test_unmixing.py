@@ -297,6 +297,59 @@ class TestNormalizeFractions:
         assert "shade" in out.data_vars
         np.testing.assert_array_equal(out["shade"].values, ds["shade"].values)
 
+    def test_clamps_out_of_bounds_fractions_after_shade_normalization(self):
+        # Shade rescale (divide by 1 - shade = 0.4) pushes char to 1.125 and
+        # pv/soil slightly negative. The output must clamp to [0, 1] and
+        # re-normalize so the canonical fractions still sum to 1.0.
+        ds = xr.Dataset(
+            {
+                "char": (["y", "x"], np.array([[0.45]], dtype=np.float32)),
+                "pv": (["y", "x"], np.array([[-0.02]], dtype=np.float32)),
+                "npv": (["y", "x"], np.array([[0.18]], dtype=np.float32)),
+                "soil": (["y", "x"], np.array([[-0.01]], dtype=np.float32)),
+                "shade": (["y", "x"], np.array([[0.6]], dtype=np.float32)),
+                "rmse": (["y", "x"], np.array([[0.01]], dtype=np.float32)),
+            },
+            coords={"y": [0], "x": [0]},
+        )
+
+        out = normalize_fractions(ds, remove_shade=True)
+
+        for v in ("char", "pv", "npv", "soil"):
+            vals = out[v].values
+            assert np.all(vals >= 0.0), f"{v} has values below 0: {vals}"
+            assert np.all(vals <= 1.0), f"{v} has values above 1: {vals}"
+
+        total = sum(out[v].values for v in ("char", "pv", "npv", "soil"))
+        np.testing.assert_allclose(total, 1.0, atol=1e-4)
+
+    def test_extreme_overshoot_is_clamped(self):
+        # Covers the upper end of the bug report (5-12% of pixels at min=-0.25,
+        # max=1.25 in real Tanager scenes): a single fraction far above 1.0
+        # combined with a strongly negative one. Clamp + re-normalize must
+        # still yield values in [0, 1] that sum to 1.
+        ds = xr.Dataset(
+            {
+                "char": (["y", "x"], np.array([[0.50]], dtype=np.float32)),
+                "pv": (["y", "x"], np.array([[-0.10]], dtype=np.float32)),
+                "npv": (["y", "x"], np.array([[0.10]], dtype=np.float32)),
+                "soil": (["y", "x"], np.array([[0.00]], dtype=np.float32)),
+                "shade": (["y", "x"], np.array([[0.5]], dtype=np.float32)),
+                "rmse": (["y", "x"], np.array([[0.01]], dtype=np.float32)),
+            },
+            coords={"y": [0], "x": [0]},
+        )
+
+        out = normalize_fractions(ds, remove_shade=True)
+
+        for v in ("char", "pv", "npv", "soil"):
+            vals = out[v].values
+            assert np.all((vals >= 0.0) & (vals <= 1.0)), (
+                f"{v} outside [0, 1]: {vals}"
+            )
+        total = sum(out[v].values for v in ("char", "pv", "npv", "soil"))
+        np.testing.assert_allclose(total, 1.0, atol=1e-4)
+
 
 # ---------------------------------------------------------------------------
 # Plotting
