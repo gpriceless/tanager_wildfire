@@ -1687,3 +1687,173 @@ class TestTemporalTrajectoryIntegration:
             )
         finally:
             plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Integration tests — interactive_map and show_product
+# ---------------------------------------------------------------------------
+
+
+def _make_integration_georef_da(nx: int = 50, ny: int = 50, seed: int = 0) -> xr.DataArray:
+    """Return a CRS-aware DataArray with EPSG:32611 for integration tests."""
+    x = np.linspace(340_000, 350_000, nx)
+    y = np.linspace(3_780_000, 3_790_000, ny)
+    rng = np.random.default_rng(seed)
+    data = rng.random((ny, nx)).astype(np.float32)
+    da = xr.DataArray(data, coords={"y": y, "x": x}, dims=["y", "x"])
+    return da.rio.write_crs("EPSG:32611")
+
+
+class TestInteractiveMapIntegration:
+    """Integration-level tests for interactive_map.
+
+    These complement (but do not duplicate) the unit tests in
+    tests/test_interactive_map.py.  Each test exercises a scenario at the
+    module boundary to confirm end-to-end wiring.
+    """
+
+    def test_interactive_map_creates_map_object(self):
+        """interactive_map must return the Map object produced by leafmap.Map."""
+        from unittest.mock import MagicMock, patch
+        from tanager.visualization import interactive_map
+
+        mock_leafmap = MagicMock()
+        mock_map = MagicMock()
+        mock_leafmap.Map.return_value = mock_map
+
+        da = _make_integration_georef_da(seed=1)
+
+        with patch.dict("sys.modules", {"leafmap": mock_leafmap}):
+            result = interactive_map([(da, "nbr")])
+
+        assert result is mock_map
+        assert mock_leafmap.Map.called, "leafmap.Map constructor must be called"
+
+    def test_interactive_map_fallback_to_folium(self):
+        """When leafmap is unavailable, interactive_map must fall back to folium."""
+        import sys
+        from unittest.mock import MagicMock, patch
+        from tanager.visualization import interactive_map
+
+        mock_folium = MagicMock()
+        mock_folium_map = MagicMock()
+        mock_folium.Map.return_value = mock_folium_map
+
+        da = _make_integration_georef_da(seed=2)
+
+        saved = sys.modules.get("leafmap", ...)
+        sys.modules["leafmap"] = None  # force ImportError on import
+
+        try:
+            with patch.dict("sys.modules", {"folium": mock_folium}):
+                result = interactive_map([(da, "nbr")])
+        finally:
+            if saved is ...:
+                sys.modules.pop("leafmap", None)
+            else:
+                sys.modules["leafmap"] = saved
+
+        assert result is mock_folium_map, (
+            "interactive_map must return folium.Map when leafmap is absent"
+        )
+        assert mock_folium.Map.called, "folium.Map constructor must be called"
+
+    def test_interactive_map_with_perimeter_geodataframe(self):
+        """Passing a GeoDataFrame as perimeters must call add_geojson on the map."""
+        import geopandas as gpd
+        from shapely.geometry import Polygon
+        from unittest.mock import MagicMock, patch
+        from tanager.visualization import interactive_map
+
+        mock_leafmap = MagicMock()
+        mock_map = MagicMock()
+        mock_leafmap.Map.return_value = mock_map
+
+        da = _make_integration_georef_da(seed=3)
+
+        poly = Polygon([(-118.5, 34.0), (-118.4, 34.0), (-118.4, 34.1), (-118.5, 34.1)])
+        gdf = gpd.GeoDataFrame({"name": ["Integration Fire"]}, geometry=[poly], crs="EPSG:4326")
+
+        with patch.dict("sys.modules", {"leafmap": mock_leafmap}):
+            result = interactive_map([(da, "nbr")], perimeters=gdf)
+
+        assert result is mock_map
+        assert mock_map.add_geojson.called, (
+            "add_geojson must be called when a GeoDataFrame is passed as perimeters"
+        )
+
+
+class TestShowProductIntegration:
+    """Integration-level tests for show_product.
+
+    These complement (but do not duplicate) the unit tests in
+    tests/test_show_product.py.  Each test exercises a combined scenario
+    that crosses the product_name, scene_date, and interactive path boundaries.
+    """
+
+    def test_show_product_static_returns_figure(self):
+        """show_product(interactive=False) must return a matplotlib Figure."""
+        from matplotlib.figure import Figure
+        from unittest.mock import patch
+        from tanager.visualization import show_product
+
+        da = _make_integration_georef_da(seed=10)
+
+        with patch("contextily.add_basemap"):
+            fig = show_product(da, product_name="nbr", interactive=False)
+
+        try:
+            assert isinstance(fig, Figure)
+        finally:
+            plt.close(fig)
+
+    def test_show_product_interactive_returns_map(self):
+        """show_product(interactive=True) must return the Map from interactive_map."""
+        from unittest.mock import MagicMock, patch
+        from tanager.visualization import show_product
+
+        da = _make_integration_georef_da(seed=11)
+        mock_map = MagicMock()
+
+        with patch("tanager.visualization.interactive_map", return_value=mock_map) as mock_fn:
+            result = show_product(da, product_name="nbr", interactive=True)
+
+        assert result is mock_map
+        mock_fn.assert_called_once()
+
+    def test_show_product_auto_detects_name(self):
+        """When product_name is omitted, show_product uses da.name for the title."""
+        from unittest.mock import patch
+        from tanager.visualization import show_product
+
+        da = _make_integration_georef_da(seed=12)
+        da.name = "ndvi"
+
+        with patch("contextily.add_basemap"):
+            fig = show_product(da, scene_date="2025-01-07")
+
+        try:
+            title = fig.axes[0].get_title()
+            assert "NDVI" in title, (
+                f"Expected 'NDVI' in title when da.name='ndvi', got {title!r}"
+            )
+        finally:
+            plt.close(fig)
+
+    def test_show_product_title_includes_date(self):
+        """Title must contain the scene_date string when one is provided."""
+        from unittest.mock import patch
+        from tanager.visualization import show_product
+
+        da = _make_integration_georef_da(seed=13)
+
+        with patch("contextily.add_basemap"):
+            fig = show_product(da, product_name="dnbr", scene_date="2025-01-23")
+
+        try:
+            title = fig.axes[0].get_title()
+            assert "2025-01-23" in title, (
+                f"Expected '2025-01-23' in title, got {title!r}"
+            )
+        finally:
+            plt.close(fig)
