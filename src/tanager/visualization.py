@@ -653,28 +653,84 @@ def load_fire_perimeters(
 def overlay_perimeters(
     ax: "Axes",
     perimeters: Any,
-    *,
-    edgecolor: str = "red",
-    facecolor: str = "none",
-    linewidth: float = 1.5,
-    **kwargs: Any,
-) -> None:
-    """Draw fire perimeter polygon(s) on *ax*.
+    color: str = "red",
+    linestyle: str = "--",
+    linewidth: float = 2.0,
+    label: bool = True,
+) -> "Axes":
+    """Draw fire perimeter polygon(s) on *ax* as vector boundary overlays.
+
+    The perimeters GeoDataFrame is reprojected to EPSG:32611 (UTM Zone 11N)
+    before plotting so that it aligns correctly with the raster data rendered
+    on *ax*.  If *perimeters* is empty (zero features) the function returns
+    *ax* unchanged.
 
     Parameters
     ----------
     ax:
-        Target matplotlib Axes.
+        Target matplotlib Axes.  Must already have a projected extent (e.g.
+        after :func:`plot_map` has been called).
     perimeters:
-        GeoDataFrame of perimeter polygons.
-    edgecolor:
-        Outline colour.
-    facecolor:
-        Fill colour; ``"none"`` produces an outline-only style.
+        GeoDataFrame of fire perimeter polygons.  Any CRS is accepted; the
+        data is reprojected to ``EPSG:32611`` internally.
+    color:
+        Line (and label text) colour.  Defaults to ``"red"``.
+    linestyle:
+        Line style string accepted by matplotlib (e.g. ``"--"``, ``"-"``,
+        ``":"``).  Defaults to ``"--"`` (dashed).
     linewidth:
-        Outline width in points.
+        Outline width in points.  Defaults to ``2.0``.
+    label:
+        When ``True`` and the GeoDataFrame contains a ``"name"`` or
+        ``"incident_name"`` column, text labels are placed at the centroid
+        of each polygon.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        The same *ax* object, with perimeter boundaries (and optional labels)
+        added in-place.
     """
-    raise NotImplementedError
+    import geopandas as gpd  # lazy import — not required in headless environments
+
+    # Guard: return immediately for empty GeoDataFrame
+    if len(perimeters) == 0:
+        return ax
+
+    # Reproject to the project-standard UTM CRS so boundaries align with rasters.
+    perimeters = perimeters.to_crs("EPSG:32611")
+
+    # Draw boundary lines for each polygon.
+    perimeters.boundary.plot(
+        ax=ax,
+        color=color,
+        linestyle=linestyle,
+        linewidth=linewidth,
+    )
+
+    # Optionally add text labels at polygon centroids.
+    if label:
+        # Determine which column to use for the label text.
+        name_col: Optional[str] = None
+        if "name" in perimeters.columns:
+            name_col = "name"
+        elif "incident_name" in perimeters.columns:
+            name_col = "incident_name"
+
+        if name_col is not None:
+            for _, row in perimeters.iterrows():
+                centroid = row.geometry.centroid
+                name_text = str(row[name_col])
+                ax.text(
+                    centroid.x,
+                    centroid.y,
+                    name_text,
+                    fontsize=8,
+                    color=color,
+                    ha="center",
+                )
+
+    return ax
 
 
 def add_scalebar(
