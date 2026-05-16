@@ -521,33 +521,188 @@ def plot_before_after(
 
 
 def plot_temporal_trajectory(
-    data: xr.DataArray,
-    *,
-    lat: Optional[float] = None,
-    lon: Optional[float] = None,
-    roi: Optional[Any] = None,
-    ax: Optional["Axes"] = None,
-    **kwargs: Any,
+    dates: list,
+    values: "list[float]",
+    product_name: str = "NBR",
+    fire_date: "str | datetime | None" = "2025-01-07",
+    error_bands: "list[float] | None" = None,
+    ax: "Optional[Axes]" = None,
+    publication: bool = False,
+    figsize: "Tuple[float, float]" = (12, 6),
 ) -> "Figure":
-    """Plot a time-series trajectory for a pixel or region of interest.
+    """Plot a time-series trajectory (e.g. NBR) for a pixel or region of interest.
 
     Parameters
     ----------
-    data:
-        DataArray with a ``time`` dimension.
-    lat, lon:
-        Coordinates of the target pixel (WGS-84).  Mutually exclusive with
-        *roi*.
-    roi:
-        Polygon or bounding-box used to spatially average the signal.
+    dates:
+        Sequence of date values.  Each entry may be a :class:`str` (e.g.
+        ``"2024-12-15"``), a :class:`datetime.datetime`, or any type accepted
+        by :func:`pandas.to_datetime`.
+    values:
+        Corresponding spectral-index values (one per date).
+    product_name:
+        Label for the y-axis and the series legend entry (e.g. ``"NBR"``).
+    fire_date:
+        Date of the fire ignition event.  A red dashed vertical line and a
+        legend entry are added when this argument is not ``None``.  Accepts
+        the same types as *dates*.
+    error_bands:
+        Per-date ±uncertainty values.  When provided, a shaded band is drawn
+        around the line using :meth:`~matplotlib.axes.Axes.fill_between`.
     ax:
-        Existing Axes to draw into.
+        Existing :class:`~matplotlib.axes.Axes` to draw into.  A new figure
+        is created when ``None``.
+    publication:
+        When ``True`` set DPI to 300 and increase font sizes for
+        publication-quality output.
+    figsize:
+        ``(width, height)`` in inches for the new figure.  Ignored when
+        *ax* is provided.
 
     Returns
     -------
     matplotlib.figure.Figure
+        Figure containing the time-series line chart.
+
+    Examples
+    --------
+    >>> import matplotlib; matplotlib.use("Agg")
+    >>> from tanager.visualization import plot_temporal_trajectory
+    >>> dates = ["2024-12-15", "2024-12-25", "2025-01-07", "2025-01-15"]
+    >>> values = [0.65, 0.62, 0.15, 0.20]
+    >>> fig = plot_temporal_trajectory(dates, values, "NBR", fire_date="2025-01-07")
     """
-    raise NotImplementedError
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+    import pandas as pd
+
+    # --- parse dates -----------------------------------------------------------
+    # pd.to_datetime handles strings, datetime objects, Timestamps, numpy
+    # datetime64, and any other type pandas recognises.
+    parsed_dates = pd.to_datetime(dates)
+
+    # --- parse fire_date -------------------------------------------------------
+    parsed_fire_date = None
+    if fire_date is not None:
+        parsed_fire_date = pd.to_datetime(fire_date)
+
+    # --- font sizes -------------------------------------------------------
+    label_fontsize = 12
+    tick_labelsize = 10
+    legend_fontsize = 10
+    if publication:
+        label_fontsize = 16
+        tick_labelsize = 13
+        legend_fontsize = 13
+
+    # --- figure / axes setup --------------------------------------------------
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.get_figure()
+
+    # --- main line plot -------------------------------------------------------
+    ax.plot(
+        parsed_dates,
+        values,
+        marker="o",
+        linewidth=2,
+        label=product_name,
+        zorder=3,
+    )
+
+    # --- optional error-band shading ------------------------------------------
+    if error_bands is not None:
+        lower = [v - e for v, e in zip(values, error_bands)]
+        upper = [v + e for v, e in zip(values, error_bands)]
+        ax.fill_between(parsed_dates, lower, upper, alpha=0.2, label=f"{product_name} ±uncertainty")
+
+    # --- fire date vertical line + phase labels --------------------------------
+    if parsed_fire_date is not None:
+        ax.axvline(
+            parsed_fire_date,
+            color="red",
+            linestyle="--",
+            linewidth=1.5,
+            label="Fire Ignition",
+            zorder=4,
+        )
+
+        # Shaded background regions: pre-fire (light green), post-fire (light red)
+        xmin_date = parsed_dates.min()
+        xmax_date = parsed_dates.max()
+
+        # Only shade pre-fire region if the fire date is not before the first date
+        if parsed_fire_date > xmin_date:
+            ax.axvspan(
+                xmin_date,
+                parsed_fire_date,
+                alpha=0.06,
+                color="green",
+                zorder=0,
+            )
+            # "Pre-Fire" label: positioned in the left half of the pre-fire region
+            pre_mid = xmin_date + (parsed_fire_date - xmin_date) / 2
+            y_range = ax.get_ylim()
+            pre_label_y = y_range[0] + (y_range[1] - y_range[0]) * 0.92
+            ax.text(
+                pre_mid,
+                pre_label_y,
+                "Pre-Fire",
+                ha="center",
+                va="top",
+                fontsize=label_fontsize - 1,
+                color="darkgreen",
+                alpha=0.7,
+            )
+
+        # Post-fire / Recovery region
+        if parsed_fire_date < xmax_date:
+            ax.axvspan(
+                parsed_fire_date,
+                xmax_date,
+                alpha=0.06,
+                color="red",
+                zorder=0,
+            )
+            post_mid = parsed_fire_date + (xmax_date - parsed_fire_date) / 2
+            y_range = ax.get_ylim()
+            post_label_y = y_range[0] + (y_range[1] - y_range[0]) * 0.92
+            ax.text(
+                post_mid,
+                post_label_y,
+                "Post-Fire / Recovery",
+                ha="center",
+                va="top",
+                fontsize=label_fontsize - 1,
+                color="darkred",
+                alpha=0.7,
+            )
+
+    # --- axis labels and formatting -------------------------------------------
+    ax.set_ylabel(product_name, fontsize=label_fontsize)
+    ax.tick_params(axis="both", labelsize=tick_labelsize)
+
+    # Auto date formatting on the x-axis: monthly major ticks for multi-month
+    # series, otherwise let matplotlib choose.
+    date_range_days = (parsed_dates.max() - parsed_dates.min()).days
+    if date_range_days > 60:
+        ax.xaxis.set_major_locator(mdates.MonthLocator())
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
+    else:
+        ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+        ax.xaxis.set_major_formatter(mdates.AutoDateFormatter(mdates.AutoDateLocator()))
+
+    fig.autofmt_xdate(rotation=30, ha="right")
+
+    # --- legend ---------------------------------------------------------------
+    ax.legend(fontsize=legend_fontsize)
+
+    # --- publication DPI ------------------------------------------------------
+    if publication:
+        fig.set_dpi(300)
+
+    return fig
 
 
 def plot_severity_summary(
