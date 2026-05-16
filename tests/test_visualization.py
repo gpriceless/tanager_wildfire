@@ -1493,3 +1493,197 @@ class TestComparisonFunctionsEndToEnd:
         finally:
             for fig in figs:
                 plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Integration tests — plot_temporal_trajectory
+# ---------------------------------------------------------------------------
+
+# Realistic fire-trajectory dataset: NBR drops sharply at ignition then recovers.
+_TRAJ_DATES = [
+    "2024-12-15",
+    "2024-12-25",
+    "2025-01-01",
+    "2025-01-07",
+    "2025-01-15",
+    "2025-01-23",
+    "2025-02-01",
+]
+_TRAJ_VALUES = [0.65, 0.62, 0.60, 0.15, 0.20, 0.25, 0.30]  # NBR drops at fire
+_TRAJ_FIRE_DATE = "2025-01-07"
+
+
+class TestTemporalTrajectoryIntegration:
+    """Integration-level tests for plot_temporal_trajectory.
+
+    Each test exercises a scenario that combines multiple behaviours of the
+    function and verifies the resulting matplotlib state at the axes level.
+    These complement (but do not duplicate) the unit tests in
+    tests/test_plot_temporal_trajectory.py.
+    """
+
+    # ------------------------------------------------------------------
+    # 1. Line with markers present
+    # ------------------------------------------------------------------
+
+    def test_line_plotted_with_markers(self):
+        """Data line must be present and must carry a visible marker.
+
+        Verifies both that a line was drawn and that it uses an explicit
+        marker symbol (not None / 'None' / empty string).
+        """
+        from tanager.visualization import plot_temporal_trajectory
+
+        fig = plot_temporal_trajectory(
+            _TRAJ_DATES, _TRAJ_VALUES, "NBR", fire_date=None
+        )
+        ax = fig.axes[0]
+        try:
+            # At least one line must be on the axes.
+            assert len(ax.lines) >= 1, "Expected at least one Line2D on the axes"
+            # The first line is the data series — it must have a marker.
+            data_line = ax.lines[0]
+            marker = data_line.get_marker()
+            assert marker not in (None, "None", ""), (
+                f"Data line has no marker; got marker={marker!r}"
+            )
+        finally:
+            plt.close(fig)
+
+    # ------------------------------------------------------------------
+    # 2. Fire-event axvline present
+    # ------------------------------------------------------------------
+
+    def test_fire_event_marker_present(self):
+        """An axvline for fire_date must be added when fire_date is supplied.
+
+        The vertical line is the second line on the axes (after the data
+        series).  We confirm >= 2 lines are present, meaning the vline was
+        created.
+        """
+        from tanager.visualization import plot_temporal_trajectory
+
+        fig = plot_temporal_trajectory(
+            _TRAJ_DATES, _TRAJ_VALUES, "NBR", fire_date=_TRAJ_FIRE_DATE
+        )
+        ax = fig.axes[0]
+        try:
+            assert len(ax.lines) >= 2, (
+                f"Expected data line + fire vline (>= 2 lines), got {len(ax.lines)}"
+            )
+        finally:
+            plt.close(fig)
+
+    # ------------------------------------------------------------------
+    # 3. Error bands rendered
+    # ------------------------------------------------------------------
+
+    def test_error_bands_rendered(self):
+        """A fill_between PolyCollection must appear in ax.collections when
+        error_bands is provided.
+
+        Uses realistic per-observation uncertainty values (±0.03–0.06 NBR).
+        """
+        from tanager.visualization import plot_temporal_trajectory
+
+        error_bands = [0.04, 0.04, 0.05, 0.06, 0.05, 0.04, 0.03]
+        fig = plot_temporal_trajectory(
+            _TRAJ_DATES, _TRAJ_VALUES, "NBR",
+            fire_date=_TRAJ_FIRE_DATE,
+            error_bands=error_bands,
+        )
+        ax = fig.axes[0]
+        try:
+            assert len(ax.collections) >= 1, (
+                "Expected at least one fill_between collection when error_bands given"
+            )
+        finally:
+            plt.close(fig)
+
+    # ------------------------------------------------------------------
+    # 4. No fire_date → no vertical line
+    # ------------------------------------------------------------------
+
+    def test_no_fire_date_no_vline(self):
+        """When fire_date=None, the axes must contain exactly one line (the
+        data series) — no extra vertical line.
+        """
+        from tanager.visualization import plot_temporal_trajectory
+
+        fig = plot_temporal_trajectory(
+            _TRAJ_DATES, _TRAJ_VALUES, "NBR", fire_date=None
+        )
+        ax = fig.axes[0]
+        try:
+            assert len(ax.lines) == 1, (
+                f"Expected exactly 1 line (data series) with fire_date=None, "
+                f"got {len(ax.lines)}"
+            )
+        finally:
+            plt.close(fig)
+
+    # ------------------------------------------------------------------
+    # 5. datetime objects accepted
+    # ------------------------------------------------------------------
+
+    def test_datetime_objects_work(self):
+        """Actual datetime.date objects must be accepted for both dates and
+        fire_date without raising an error.
+
+        Mirrors the realistic NBR fire trajectory but passes native Python
+        datetime objects instead of strings.
+        """
+        import datetime
+        from tanager.visualization import plot_temporal_trajectory
+
+        dt_dates = [
+            datetime.date(2024, 12, 15),
+            datetime.date(2024, 12, 25),
+            datetime.date(2025, 1, 1),
+            datetime.date(2025, 1, 7),
+            datetime.date(2025, 1, 15),
+            datetime.date(2025, 1, 23),
+            datetime.date(2025, 2, 1),
+        ]
+        dt_fire = datetime.date(2025, 1, 7)
+
+        fig = plot_temporal_trajectory(
+            dt_dates, _TRAJ_VALUES, "NBR", fire_date=dt_fire
+        )
+        ax = fig.axes[0]
+        try:
+            # Both data line and fire vline must be present.
+            assert len(ax.lines) >= 2, (
+                "Expected data line + fire vline when datetime objects passed"
+            )
+        finally:
+            plt.close(fig)
+
+    # ------------------------------------------------------------------
+    # 6. String dates accepted
+    # ------------------------------------------------------------------
+
+    def test_string_dates_work(self):
+        """String dates in 'YYYY-MM-DD' format must be parsed correctly.
+
+        Uses the canonical fire-trajectory strings defined at the top of this
+        section and verifies the complete output: line present, vline present,
+        and y-axis label matches the product name.
+        """
+        from tanager.visualization import plot_temporal_trajectory
+
+        fig = plot_temporal_trajectory(
+            _TRAJ_DATES, _TRAJ_VALUES, "NBR", fire_date=_TRAJ_FIRE_DATE
+        )
+        ax = fig.axes[0]
+        try:
+            # Data line present.
+            assert len(ax.lines) >= 1, "No data line found for string date input"
+            # Fire vline present.
+            assert len(ax.lines) >= 2, "No fire vline found for string date input"
+            # Y-axis label set correctly.
+            assert ax.get_ylabel() == "NBR", (
+                f"Expected ylabel='NBR', got {ax.get_ylabel()!r}"
+            )
+        finally:
+            plt.close(fig)
