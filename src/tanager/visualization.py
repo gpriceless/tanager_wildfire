@@ -735,20 +735,108 @@ def overlay_perimeters(
 
 def add_scalebar(
     ax: "Axes",
-    *,
-    length_km: Optional[float] = None,
-    location: str = "lower right",
-    **kwargs: Any,
-) -> None:
+    length_km: float = 5.0,
+    location: str = "lower left",
+) -> "Axes":
     """Add a distance scale-bar to a map axes.
+
+    Draws a black-filled rectangle with a white outline and a text label in
+    data coordinates.  The bar width equals ``length_km * 1000`` metres, which
+    aligns exactly with UTM (metre-unit) projected axes.  No external packages
+    beyond matplotlib are required.
 
     Parameters
     ----------
     ax:
-        Target matplotlib Axes (must have a projected CRS).
+        Target matplotlib Axes.  Should already have its limits set (e.g.
+        after :func:`plot_map` has been called) so that the bar is positioned
+        correctly within the data extent.
     length_km:
-        Desired bar length in kilometres.  Auto-selected when ``None``.
+        Desired bar length in kilometres.  Defaults to ``5.0`` km.
     location:
-        Corner of the axes to place the bar in.
+        Corner of the axes in which to anchor the bar.  Recognised values:
+
+        * ``"lower left"`` (default)
+        * ``"lower right"``
+        * ``"upper left"``
+        * ``"upper right"``
+
+        Unrecognised values fall back to ``"lower left"`` with a warning.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        The same *ax* object with the scale bar rectangle and label added
+        in-place.
     """
-    raise NotImplementedError
+    from matplotlib.patches import Rectangle  # lazy import
+
+    xmin, xmax = ax.get_xlim()
+    ymin, ymax = ax.get_ylim()
+
+    x_range = xmax - xmin
+    y_range = ymax - ymin
+
+    # Bar dimensions in data coordinates (UTM metres).
+    bar_width = length_km * 1000.0
+    bar_height = y_range * 0.01  # ~1 % of the y-range for a thin bar
+
+    # Margin offsets: 5 % of each axis range from the chosen corner.
+    x_margin = x_range * 0.05
+    y_margin = y_range * 0.05
+
+    # Resolve location to bar anchor (lower-left corner of the rectangle).
+    location_lower = location.lower().strip()
+    if location_lower == "lower left":
+        bar_x = xmin + x_margin
+        bar_y = ymin + y_margin
+    elif location_lower == "lower right":
+        bar_x = xmax - x_margin - bar_width
+        bar_y = ymin + y_margin
+    elif location_lower == "upper left":
+        bar_x = xmin + x_margin
+        bar_y = ymax - y_range * 0.10 - bar_height
+    elif location_lower == "upper right":
+        bar_x = xmax - x_margin - bar_width
+        bar_y = ymax - y_range * 0.10 - bar_height
+    else:
+        logger.warning(
+            "add_scalebar: unrecognised location %r; falling back to 'lower left'",
+            location,
+        )
+        bar_x = xmin + x_margin
+        bar_y = ymin + y_margin
+
+    # Draw the scale bar rectangle: black fill, white outline.
+    rect = Rectangle(
+        (bar_x, bar_y),
+        bar_width,
+        bar_height,
+        linewidth=1,
+        edgecolor="white",
+        facecolor="black",
+        zorder=10,
+    )
+    ax.add_patch(rect)
+
+    # Format label: omit the decimal when length_km is a whole number.
+    if length_km == int(length_km):
+        label = f"{int(length_km)} km"
+    else:
+        label = f"{length_km} km"
+
+    # Place text centred horizontally above the bar.
+    text_x = bar_x + bar_width / 2.0
+    text_y = bar_y + bar_height + y_range * 0.005  # small gap above bar
+    ax.text(
+        text_x,
+        text_y,
+        label,
+        ha="center",
+        va="bottom",
+        fontsize=8,
+        color="black",
+        zorder=11,
+    )
+
+    return ax
