@@ -37,12 +37,14 @@ environments that lack those packages.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
     Dict,
+    List,
     Optional,
     Sequence,
     Tuple,
@@ -78,10 +80,98 @@ __all__ = [
 # Style configuration
 # ---------------------------------------------------------------------------
 
-#: Mapping of product name → style kwargs passed to plotting functions.
-#: Populated by downstream configuration; left empty here so the module
-#: is importable with no side-effects.
-PRODUCT_STYLES: Dict[str, Any] = {}
+
+@dataclasses.dataclass
+class ProductStyle:
+    """Colormap and scale configuration for a single Tanager product."""
+
+    cmap: str
+    vmin: float
+    vmax: float
+    label: str
+    class_ticks: Optional[List[float]]
+
+
+#: Mapping of product name → :class:`ProductStyle` presets used by plotting helpers.
+PRODUCT_STYLES: Dict[str, ProductStyle] = {
+    "nbr": ProductStyle(
+        cmap="RdYlGn",
+        vmin=-1.0,
+        vmax=1.0,
+        label="NBR",
+        class_ticks=None,
+    ),
+    "ndvi": ProductStyle(
+        cmap="RdYlGn",
+        vmin=-1.0,
+        vmax=1.0,
+        label="NDVI",
+        class_ticks=None,
+    ),
+    "ndwi": ProductStyle(
+        cmap="RdYlBu",
+        vmin=-1.0,
+        vmax=1.0,
+        label="NDWI",
+        class_ticks=None,
+    ),
+    "dnbr": ProductStyle(
+        cmap="RdYlGn_r",
+        vmin=-0.5,
+        vmax=1.3,
+        label="dNBR (Burn Severity)",
+        class_ticks=[0.1, 0.27, 0.44, 0.66],
+    ),
+    "cbi": ProductStyle(
+        cmap="YlOrRd",
+        vmin=0.0,
+        vmax=3.0,
+        label="CBI (Composite Burn Index)",
+        class_ticks=[0.0, 1.0, 2.0, 3.0],
+    ),
+    "severity": ProductStyle(
+        cmap="tab10",
+        vmin=0,
+        vmax=5,
+        label="Severity Class",
+        class_ticks=[0, 1, 2, 3, 4, 5],
+    ),
+    "char": ProductStyle(
+        cmap="Reds",
+        vmin=0.0,
+        vmax=1.0,
+        label="Char Fraction",
+        class_ticks=None,
+    ),
+    "pv": ProductStyle(
+        cmap="Greens",
+        vmin=0.0,
+        vmax=1.0,
+        label="Photosynthetic Vegetation",
+        class_ticks=None,
+    ),
+    "npv": ProductStyle(
+        cmap="YlOrBr",
+        vmin=0.0,
+        vmax=1.0,
+        label="Non-Photosynthetic Vegetation",
+        class_ticks=None,
+    ),
+    "soil": ProductStyle(
+        cmap="copper",
+        vmin=0.0,
+        vmax=1.0,
+        label="Soil Fraction",
+        class_ticks=None,
+    ),
+    "lfmc": ProductStyle(
+        cmap="RdYlGn",
+        vmin=0.0,
+        vmax=200.0,
+        label="LFMC (%)",
+        class_ticks=[30, 60, 90, 120],
+    ),
+}
 
 
 # ---------------------------------------------------------------------------
