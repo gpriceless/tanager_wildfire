@@ -1146,3 +1146,350 @@ class TestPlotSeveritySummaryFigsize:
             assert (w, h) == pytest.approx(custom_size)
         finally:
             plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Integration tests — comparison panel functions with CRS-aware DataArrays
+# ---------------------------------------------------------------------------
+
+
+def _make_crs_da(nx: int = 50, ny: int = 50, seed: int = 0, scale: float = 1.0) -> xr.DataArray:
+    """Return a synthetic DataArray with EPSG:32611 CRS written via rio.write_crs."""
+    x = np.linspace(340_000, 350_000, nx)
+    y = np.linspace(3_780_000, 3_790_000, ny)
+    rng = np.random.default_rng(seed)
+    data = rng.random((ny, nx)).astype(np.float32) * scale
+    da = xr.DataArray(data, coords={"y": y, "x": x}, dims=["y", "x"])
+    return da.rio.write_crs("EPSG:32611")
+
+
+class TestPlotBeforeAfterWithCrsMetadata:
+    """plot_before_after with CRS-tagged DataArrays must render 2 UTM panels and a shared colorbar."""
+
+    def test_two_panels_and_shared_colorbar(self):
+        """Figure has >= 3 axes: 2 map panels + shared colorbar."""
+        from tanager.visualization import plot_before_after
+
+        pre = _make_crs_da(seed=1)
+        post = _make_crs_da(seed=2)
+        fig = plot_before_after(pre, post, "nbr")
+        try:
+            assert len(fig.axes) >= 3, (
+                f"Expected >= 3 axes (2 panels + colorbar), got {len(fig.axes)}"
+            )
+        finally:
+            plt.close(fig)
+
+    def test_both_panels_have_utm_xlim(self):
+        """Both panels must show UTM metres (> 100 000) on the x-axis."""
+        from tanager.visualization import plot_before_after
+
+        pre = _make_crs_da(seed=3)
+        post = _make_crs_da(seed=4)
+        fig = plot_before_after(pre, post, "nbr")
+        try:
+            for idx, label in [(0, "pre"), (1, "post")]:
+                xlo, xhi = fig.axes[idx].get_xlim()
+                assert xlo > 100_000, (
+                    f"{label} panel xlim lower {xlo:.0f} looks like pixel space"
+                )
+                assert xhi > 100_000, (
+                    f"{label} panel xlim upper {xhi:.0f} looks like pixel space"
+                )
+        finally:
+            plt.close(fig)
+
+    def test_shared_colorbar_has_product_label(self):
+        """The colorbar must carry the label from PRODUCT_STYLES for the requested product."""
+        from tanager.visualization import plot_before_after
+
+        pre = _make_crs_da(seed=5)
+        post = _make_crs_da(seed=6)
+        fig = plot_before_after(pre, post, "nbr")
+        try:
+            # The shared colorbar is rendered horizontally (orientation='horizontal'),
+            # so its label is set on the x-axis of the colorbar Axes (ax[2] onward).
+            # Check both x- and y-axis labels to be orientation-agnostic.
+            cb_axes = fig.axes[2:]
+            cb_labels = [ax.get_xlabel() + ax.get_ylabel() for ax in cb_axes]
+            any_match = any(PRODUCT_STYLES["nbr"].label in lbl for lbl in cb_labels)
+            assert any_match, (
+                f"Expected '{PRODUCT_STYLES['nbr'].label}' in colorbar label, "
+                f"got axes labels: {cb_labels}"
+            )
+        finally:
+            plt.close(fig)
+
+
+class TestPlotBeforeAfterWithPerimeters:
+    """plot_before_after with fire_perimeters must draw overlays on both panels."""
+
+    def _make_perimeter_gdf(self):
+        """GeoDataFrame with a synthetic polygon in EPSG:4326."""
+        import geopandas as gpd
+        from shapely.geometry import Polygon
+
+        poly = Polygon(
+            [(-118.5, 34.0), (-118.4, 34.0), (-118.4, 34.1), (-118.5, 34.1)]
+        )
+        return gpd.GeoDataFrame({"name": ["CRS Test Fire"]}, geometry=[poly], crs="EPSG:4326")
+
+    def test_perimeters_drawn_on_both_panels(self):
+        """Both the pre and post axes must gain collections or lines from the overlay."""
+        from tanager.visualization import plot_before_after
+
+        pre = _make_crs_da(seed=10)
+        post = _make_crs_da(seed=11)
+        gdf = self._make_perimeter_gdf()
+        fig = plot_before_after(pre, post, "nbr", fire_perimeters=gdf)
+        try:
+            ax_pre = fig.axes[0]
+            ax_post = fig.axes[1]
+            pre_has_overlay = len(ax_pre.collections) > 0 or len(ax_pre.lines) > 0
+            post_has_overlay = len(ax_post.collections) > 0 or len(ax_post.lines) > 0
+            assert pre_has_overlay, "Pre-fire panel has no perimeter overlay (collections/lines)"
+            assert post_has_overlay, "Post-fire panel has no perimeter overlay (collections/lines)"
+        finally:
+            plt.close(fig)
+
+    def test_figure_still_has_three_or_more_axes(self):
+        """Adding perimeters must not remove the shared colorbar axis."""
+        from tanager.visualization import plot_before_after
+
+        pre = _make_crs_da(seed=12)
+        post = _make_crs_da(seed=13)
+        gdf = self._make_perimeter_gdf()
+        fig = plot_before_after(pre, post, "nbr", fire_perimeters=gdf)
+        try:
+            assert len(fig.axes) >= 3
+        finally:
+            plt.close(fig)
+
+
+class TestPlotDifferenceMapWithCrs:
+    """plot_difference_map with a CRS-tagged DataArray must render contours."""
+
+    def test_contours_present_for_crs_dnbr(self):
+        """dNBR DataArray with rio CRS must still produce contour lines."""
+        from tanager.visualization import plot_difference_map
+
+        # Create a dNBR-like DataArray spanning the full severity range so all
+        # four USGS thresholds fall within the data range.
+        x = np.linspace(340_000, 350_000, 100)
+        y = np.linspace(3_780_000, 3_790_000, 100)
+        data = np.linspace(-0.2, 1.0, 100 * 100).reshape(100, 100).astype(np.float32)
+        dnbr = xr.DataArray(data, coords={"y": y, "x": x}, dims=["y", "x"])
+        dnbr = dnbr.rio.write_crs("EPSG:32611")
+
+        fig = plot_difference_map(dnbr, "dnbr")
+        ax = fig.axes[0]
+        try:
+            has_contours = any(
+                hasattr(c, "get_paths") and len(c.get_paths()) > 0
+                for c in ax.collections
+            )
+            assert has_contours, "Expected contour lines for CRS-tagged dNBR DataArray"
+        finally:
+            plt.close(fig)
+
+    def test_utm_axes_present_for_crs_dnbr(self):
+        """Map panel must use UTM-scale axes when CRS DataArray has UTM coordinates."""
+        from tanager.visualization import plot_difference_map
+
+        dnbr = _make_crs_da(seed=20, scale=1.3)  # values up to 1.3, spans dnbr range
+        fig = plot_difference_map(dnbr, "dnbr")
+        try:
+            ax = fig.axes[0]
+            xlo, xhi = ax.get_xlim()
+            assert xlo > 100_000, f"xlim lower {xlo:.0f} looks like pixel-space, not UTM"
+        finally:
+            plt.close(fig)
+
+
+class TestPlotSeveritySummaryWithCrs:
+    """plot_severity_summary with CRS-tagged DataArrays must use UTM axes on all 6 panels."""
+
+    def _make_crs_fractions_ds(self, nx: int = 50, ny: int = 50) -> xr.Dataset:
+        """Fractions Dataset where each variable carries EPSG:32611 CRS."""
+        x = np.linspace(340_000, 350_000, nx)
+        y = np.linspace(3_780_000, 3_790_000, ny)
+        coords = {"y": y, "x": x}
+        rng = np.random.default_rng(99)
+
+        def _var(seed_offset: int) -> xr.DataArray:
+            da = xr.DataArray(
+                rng.random((ny, nx)).astype(np.float32),
+                coords=coords,
+                dims=["y", "x"],
+            )
+            return da.rio.write_crs("EPSG:32611")
+
+        return xr.Dataset(
+            {
+                "char": _var(0),
+                "pv": _var(1),
+                "npv": _var(2),
+                "soil": _var(3),
+            }
+        )
+
+    def test_six_utm_panels(self):
+        """All 6 map panels must have UTM-scale x-axis limits (> 100 000 m)."""
+        from tanager.visualization import plot_severity_summary
+
+        fractions = self._make_crs_fractions_ds()
+        cbi = _make_crs_da(seed=50, scale=3.0)
+        severity = xr.DataArray(
+            np.random.default_rng(55).integers(0, 5, (50, 50)).astype(float),
+            coords={"y": np.linspace(3_780_000, 3_790_000, 50), "x": np.linspace(340_000, 350_000, 50)},
+            dims=["y", "x"],
+        ).rio.write_crs("EPSG:32611")
+
+        fig = plot_severity_summary(fractions, cbi, severity)
+        try:
+            map_axes = [ax for ax in fig.axes if ax.get_xlim()[1] > 100_000]
+            assert len(map_axes) == 6, (
+                f"Expected 6 UTM-scale panels, found {len(map_axes)}"
+            )
+        finally:
+            plt.close(fig)
+
+    def test_all_six_panels_have_easting_label(self):
+        """Every map panel must carry 'Easting (km)' on its x-axis."""
+        from tanager.visualization import plot_severity_summary
+
+        fractions = self._make_crs_fractions_ds()
+        cbi = _make_crs_da(seed=60, scale=3.0)
+        severity = xr.DataArray(
+            np.random.default_rng(65).integers(0, 5, (50, 50)).astype(float),
+            coords={"y": np.linspace(3_780_000, 3_790_000, 50), "x": np.linspace(340_000, 350_000, 50)},
+            dims=["y", "x"],
+        ).rio.write_crs("EPSG:32611")
+
+        fig = plot_severity_summary(fractions, cbi, severity)
+        try:
+            map_axes = [ax for ax in fig.axes if ax.get_xlim()[1] > 100_000]
+            for ax in map_axes:
+                assert ax.get_xlabel() == "Easting (km)", (
+                    f"Expected 'Easting (km)', got {ax.get_xlabel()!r}"
+                )
+        finally:
+            plt.close(fig)
+
+
+class TestComparisonFunctionsEndToEnd:
+    """Simulate a mini fire-analysis pipeline calling all three comparison functions."""
+
+    def test_all_three_functions_return_figures(self):
+        """plot_before_after, plot_difference_map, and plot_severity_summary all return Figures."""
+        from matplotlib.figure import Figure
+        from tanager.visualization import (
+            plot_before_after,
+            plot_difference_map,
+            plot_severity_summary,
+        )
+
+        # --- Arrange: synthetic pre- and post-fire NBR scenes -------------------
+        x = np.linspace(340_000, 350_000, 60)
+        y = np.linspace(3_780_000, 3_790_000, 60)
+        coords = {"y": y, "x": x}
+        rng = np.random.default_rng(2024)
+
+        pre_nbr = xr.DataArray(
+            rng.uniform(0.2, 0.8, (60, 60)).astype(np.float32),
+            coords=coords,
+            dims=["y", "x"],
+        ).rio.write_crs("EPSG:32611")
+
+        post_nbr = xr.DataArray(
+            rng.uniform(-0.1, 0.5, (60, 60)).astype(np.float32),
+            coords=coords,
+            dims=["y", "x"],
+        ).rio.write_crs("EPSG:32611")
+
+        # Compute a dNBR-like difference (pre minus post × scale factor).
+        dnbr_data = (pre_nbr.values - post_nbr.values) * 1.0
+        dnbr = xr.DataArray(dnbr_data, coords=coords, dims=["y", "x"]).rio.write_crs("EPSG:32611")
+
+        # Mock fraction Dataset from synthetic data.
+        def _frac(s: int) -> xr.DataArray:
+            arr = rng.random((60, 60)).astype(np.float32)
+            return xr.DataArray(arr, coords=coords, dims=["y", "x"]).rio.write_crs("EPSG:32611")
+
+        fractions = xr.Dataset({"char": _frac(0), "pv": _frac(1), "npv": _frac(2), "soil": _frac(3)})
+        cbi = xr.DataArray(
+            rng.uniform(0, 3, (60, 60)).astype(np.float32),
+            coords=coords,
+            dims=["y", "x"],
+        ).rio.write_crs("EPSG:32611")
+        severity = xr.DataArray(
+            rng.integers(0, 5, (60, 60)).astype(float),
+            coords=coords,
+            dims=["y", "x"],
+        ).rio.write_crs("EPSG:32611")
+
+        # --- Act -----------------------------------------------------------------
+        fig_ba = plot_before_after(pre_nbr, post_nbr, "nbr")
+        fig_dm = plot_difference_map(dnbr, "dnbr")
+        fig_ss = plot_severity_summary(fractions, cbi, severity)
+
+        # --- Assert --------------------------------------------------------------
+        try:
+            assert isinstance(fig_ba, Figure), "plot_before_after did not return a Figure"
+            assert isinstance(fig_dm, Figure), "plot_difference_map did not return a Figure"
+            assert isinstance(fig_ss, Figure), "plot_severity_summary did not return a Figure"
+
+            # Each function must have produced axes (non-trivial output).
+            assert len(fig_ba.axes) >= 3, "plot_before_after: expected >= 3 axes"
+            assert len(fig_dm.axes) >= 2, "plot_difference_map: expected >= 2 axes (map + colorbar)"
+            assert len(fig_ss.axes) >= 6, "plot_severity_summary: expected >= 6 axes"
+        finally:
+            plt.close(fig_ba)
+            plt.close(fig_dm)
+            plt.close(fig_ss)
+
+    def test_pipeline_figures_have_utm_scale_axes(self):
+        """All map panels produced by the pipeline must render in UTM metres."""
+        from tanager.visualization import (
+            plot_before_after,
+            plot_difference_map,
+            plot_severity_summary,
+        )
+
+        x = np.linspace(340_000, 350_000, 40)
+        y = np.linspace(3_780_000, 3_790_000, 40)
+        coords = {"y": y, "x": x}
+        rng = np.random.default_rng(777)
+
+        def _da(scale: float = 1.0) -> xr.DataArray:
+            return xr.DataArray(
+                rng.random((40, 40)).astype(np.float32) * scale,
+                coords=coords,
+                dims=["y", "x"],
+            ).rio.write_crs("EPSG:32611")
+
+        pre = _da()
+        post = _da()
+        dnbr = _da(scale=1.3)
+        fractions = xr.Dataset({"char": _da(), "pv": _da(), "npv": _da(), "soil": _da()})
+        cbi = _da(scale=3.0)
+        severity = xr.DataArray(
+            rng.integers(0, 5, (40, 40)).astype(float),
+            coords=coords,
+            dims=["y", "x"],
+        ).rio.write_crs("EPSG:32611")
+
+        fig_ba = plot_before_after(pre, post, "nbr")
+        fig_dm = plot_difference_map(dnbr, "dnbr")
+        fig_ss = plot_severity_summary(fractions, cbi, severity)
+
+        figs = [fig_ba, fig_dm, fig_ss]
+        try:
+            for fig in figs:
+                utm_axes = [ax for ax in fig.axes if ax.get_xlim()[1] > 100_000]
+                assert utm_axes, (
+                    f"Figure {fig!r} produced no UTM-scale axes; all xlims were small"
+                )
+        finally:
+            for fig in figs:
+                plt.close(fig)
