@@ -60,9 +60,13 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+# Slow tests (full notebook execution) are opt-in: the default suite excludes
+# them so it stays fast and data-independent. Run them with `pytest -m slow`.
+addopts = "-m 'not slow'"
 markers = [
     "integration: tests that depend on bulk data assets (real Tanager HDF5 scenes)",
     "smoke: end-to-end smoke tests exercising the public API as a user would",
+    "slow: long-running tests (e.g. full notebook execution); opt-in via '-m slow'",
 ]
 
 [tool.mypy]
