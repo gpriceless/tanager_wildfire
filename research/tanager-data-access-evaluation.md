@@ -1,7 +1,6 @@
 # Tanager-1 Data Access & Sensor Characterization
 
 **Date:** 2026-04-27
-**Plane Issue:** TANAGER-3
 
 ---
 

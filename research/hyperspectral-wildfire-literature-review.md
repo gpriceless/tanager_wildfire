@@ -1,7 +1,6 @@
 # Deep Literature Review: Hyperspectral Remote Sensing for Wildfire Analysis
 
 **Date:** 2026-04-27
-**Plane Issue:** TANAGER-2
 
 ---
 

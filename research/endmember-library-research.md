@@ -1,7 +1,6 @@
 # Endmember Library Research for FireSpec MESMA
 
 **Date:** 2026-04-27
-**Plane Issue:** TANAGER-4
 
 ---
 
