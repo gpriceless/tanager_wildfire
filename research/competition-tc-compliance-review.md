@@ -145,11 +145,11 @@ Our FireSpec submission (burn severity + LFMC) is **fully compliant** with the c
 |----------|--------|-------|----------|
 | **HIGH** | Register for the competition online | Participant (human) | ASAP (registration open since April 14) |
 | **HIGH** | Verify FRAMES SoCal library redistribution rights | Team | Before Phase 3 |
-| **HIGH** | Plan visualization & storytelling strategy (20% of score) | Product Queen | Phase 4 planning |
+| **HIGH** | Plan visualization & storytelling strategy (20% of score) | Author | Phase 4 planning |
 | **MEDIUM** | Plan Zenodo data derivative hosting | Team | Phase 4 |
-| **MEDIUM** | Design open-source library packaging for +5 tie-breaker | EM / Product Queen | Phase 4 |
+| **MEDIUM** | Design open-source library packaging for +5 tie-breaker | Author | Phase 4 |
 | **MEDIUM** | Include Tanager vs EMIT/PRISMA quantitative comparison | Team | Phase 3 |
-| **LOW** | Consider 3-minute video walkthrough as optional deliverable | Product Queen | Phase 4 |
+| **LOW** | Consider 3-minute video walkthrough as optional deliverable | Author | Phase 4 |
 | **LOW** | Confirm all eligibility requirements with participant | Participant (human) | Before submission |
 
 ---
