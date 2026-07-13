@@ -38,7 +38,9 @@ References:
 from __future__ import annotations
 
 import logging
+import os
 from os import PathLike
+from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence, Union
 
 import numpy as np
@@ -125,10 +127,6 @@ def load_aviris3_reference(
         ValueError: If the file cannot be parsed as either GeoTIFF or NetCDF
             with a recognisable fraction schema.
     """
-    import os
-
-    from pathlib import Path
-
     path = Path(filepath)
     if not path.exists():
         raise FileNotFoundError(
@@ -150,7 +148,7 @@ def load_aviris3_reference(
     return aggregated
 
 
-def _load_aviris3_raster(path: "Path") -> xr.Dataset:  # type: ignore[name-defined]
+def _load_aviris3_raster(path: Path) -> xr.Dataset:
     """Open a GeoTIFF / ENVI fraction raster and label bands as fraction names."""
     import rasterio
 
@@ -198,7 +196,7 @@ def _load_aviris3_raster(path: "Path") -> xr.Dataset:  # type: ignore[name-defin
     return ds
 
 
-def _load_aviris3_netcdf(path: "Path") -> xr.Dataset:  # type: ignore[name-defined]
+def _load_aviris3_netcdf(path: Path) -> xr.Dataset:
     """Open a NetCDF fraction product and rename to canonical schema."""
     ds = xr.open_dataset(path)
     rename: dict[str, str] = {}

@@ -46,7 +46,6 @@ from typing import (
     Dict,
     List,
     Optional,
-    Sequence,
     Tuple,
     Union,
 )
@@ -55,6 +54,9 @@ import numpy as np
 import xarray as xr
 
 if TYPE_CHECKING:  # pragma: no cover
+    from datetime import datetime
+
+    from leafmap import Map
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
@@ -572,8 +574,8 @@ def plot_temporal_trajectory(
     >>> values = [0.65, 0.62, 0.15, 0.20]
     >>> fig = plot_temporal_trajectory(dates, values, "NBR", fire_date="2025-01-07")
     """
-    import matplotlib.pyplot as plt
     import matplotlib.dates as mdates
+    import matplotlib.pyplot as plt
     import pandas as pd
 
     # --- parse dates -----------------------------------------------------------
@@ -1025,7 +1027,6 @@ def interactive_map(
     ...     pass  # would return a mocked Map object
     """
     import tempfile
-    import os
 
     # --- resolve perimeters -------------------------------------------------------
     # Do this early so we can fail fast before expensive raster I/O.
@@ -1161,8 +1162,8 @@ def interactive_map(
     # --- attempt folium (fallback) --------------------------------------------
     try:
         import folium  # lazy import
-        import matplotlib.pyplot as _plt
         import matplotlib.colors as _mpl_colors
+        import matplotlib.pyplot as _plt
 
         m_folium = folium.Map(location=list(center), zoom_start=zoom)
 
@@ -1471,7 +1472,6 @@ def overlay_perimeters(
         The same *ax* object, with perimeter boundaries (and optional labels)
         added in-place.
     """
-    import geopandas as gpd  # lazy import — not required in headless environments
 
     # Guard: return immediately for empty GeoDataFrame
     if len(perimeters) == 0:

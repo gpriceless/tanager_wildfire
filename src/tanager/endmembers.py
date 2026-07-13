@@ -31,7 +31,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable, Mapping, Optional, Sequence, Tuple, Union
+from typing import TYPE_CHECKING, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import xarray as xr

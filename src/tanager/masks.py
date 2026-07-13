@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import logging
 from functools import reduce
-from typing import Optional, Union
 from os import PathLike
+from typing import Optional, Union
 
 import numpy as np
 import xarray as xr
