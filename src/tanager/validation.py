@@ -328,6 +328,18 @@ def load_aviris3_reflectance(
 
     rfl_var = _find_variable(ds, _AVIRIS3_RFL_CANDIDATES)
     if rfl_var is None:
+        # AVIRIS-3 L2A OE products (DOI 10.3334/ORNLDAAC/2357) store the
+        # reflectance cube inside a NetCDF group (e.g. "/reflectance"), while
+        # the spatial coords (easting/northing) and the CRS grid-mapping
+        # variable live in the root group. xr.open_dataset reads only the root
+        # — which surfaces just the grid-mapping var — so fall back to a
+        # group-aware open that merges the group's cube with the root coords.
+        grouped = _open_aviris3_grouped(path, ds)
+        if grouped is not None:
+            ds.close()
+            ds = grouped
+            rfl_var = _find_variable(ds, _AVIRIS3_RFL_CANDIDATES)
+    if rfl_var is None:
         raise ValueError(
             f"No reflectance variable found in {filepath}. "
             f"Expected one of {_AVIRIS3_RFL_CANDIDATES}. "
@@ -428,6 +440,90 @@ def _find_variable(
         if name in ds.data_vars:
             return name
     return None
+
+
+def _open_aviris3_grouped(
+    path: Path, root: xr.Dataset,
+) -> Optional[xr.Dataset]:
+    """Open a grouped AVIRIS-3 L2A NetCDF as a single flat Dataset.
+
+    AVIRIS-3 L2A OE products place the reflectance cube in a NetCDF group and
+    keep the spatial coordinates (``easting``/``northing``) and CRS
+    grid-mapping variable in the root group. This locates the group holding a
+    recognised reflectance variable, then merges the root-level spatial coords
+    and CRS onto it so the rest of the loader can treat it as a flat Dataset.
+
+    Args:
+        path: Path to the AVIRIS-3 ``*_RFL_ORT.nc`` file.
+        root: The already-opened root-group Dataset.
+
+    Returns:
+        A flattened Dataset containing the reflectance cube with spatial coords
+        and a ``crs`` attr, or ``None`` if no group holds a reflectance cube.
+    """
+    try:
+        import netCDF4  # noqa: PLC0415 — optional, only needed for group discovery
+    except ImportError:
+        return None
+
+    with netCDF4.Dataset(path) as nc:
+        group_names = list(nc.groups.keys())
+    if not group_names:
+        return None
+
+    # Prefer a group named like a reflectance candidate (e.g. "reflectance").
+    ordered = [g for g in group_names if g in _AVIRIS3_RFL_CANDIDATES]
+    ordered += [g for g in group_names if g not in ordered]
+
+    for gname in ordered:
+        try:
+            grp = xr.open_dataset(path, group=gname)
+        except (OSError, ValueError):
+            continue
+        if _find_variable(grp, _AVIRIS3_RFL_CANDIDATES) is None:
+            grp.close()
+            continue
+
+        # Merge root-level spatial coords onto the group by shared dim name.
+        for cname in ("easting", "northing", "x", "y", "lat", "lon",
+                      "latitude", "longitude"):
+            if cname in root.variables and cname in grp.dims:
+                grp = grp.assign_coords({cname: root[cname].values})
+
+        _promote_aviris3_crs(grp, root)
+        return grp
+
+    return None
+
+
+def _promote_aviris3_crs(grp: xr.Dataset, root: xr.Dataset) -> None:
+    """Copy the CRS from the root grid-mapping variable to ``grp.attrs['crs']``.
+
+    The reflectance variable's ``grid_mapping`` attr names a scalar variable in
+    the root group (e.g. ``transverse_mercator``) whose attrs carry the CRS WKT
+    (``spatial_ref`` / ``crs_wkt``). ``_extract_crs`` only inspects dataset-level
+    attrs, so promote the WKT string up so it is discoverable.
+    """
+    if "crs" in grp.attrs:
+        return
+
+    gm_name: Optional[str] = None
+    rfl_var = _find_variable(grp, _AVIRIS3_RFL_CANDIDATES)
+    if rfl_var is not None:
+        gm_name = grp[rfl_var].attrs.get("grid_mapping")
+    if gm_name is None or gm_name not in root.variables:
+        for cand in ("transverse_mercator", "crs", "spatial_ref"):
+            if cand in root.variables:
+                gm_name = cand
+                break
+    if gm_name is None or gm_name not in root.variables:
+        return
+
+    gm_attrs = root[gm_name].attrs
+    for attr in ("spatial_ref", "crs_wkt"):
+        if attr in gm_attrs:
+            grp.attrs["crs"] = str(gm_attrs[attr])
+            return
 
 
 def _extract_aviris3_wavelengths(
