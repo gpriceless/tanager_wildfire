@@ -104,6 +104,11 @@ _BARC_CODE_MAP: Mapping[int, int] = {
 # :func:`load_barc_reference` when loading SBS rasters; pixels outside the
 # mapped perimeter (code 0) are treated as nodata (-1) so they don't pollute
 # accuracy metrics.
+#
+# WARNING: BAER SBS encodings vary by product — some rasters use additional
+# codes (e.g. 15 for unburned-inside-perimeter).  Always verify the code
+# distribution of each raster (``np.unique(data, return_counts=True)``) and
+# supply a per-raster ``code_map`` if codes outside 0..4 are present.
 SBS_CODE_MAP: Mapping[int, int] = {
     0: -1,  # Outside mapped perimeter → nodata
     1: 1,   # Low (field-corrected)
@@ -849,6 +854,7 @@ def load_barc_reference(
     *,
     code_map: Optional[Mapping[int, int]] = None,
     target_grid: Optional[xr.DataArray] = None,
+    strict: bool = True,
 ) -> xr.DataArray:
     """Load a USGS BARC classified-severity GeoTIFF as a Tanager-aligned DataArray.
 
@@ -866,12 +872,16 @@ def load_barc_reference(
     Args:
         filepath: Path to the BARC GeoTIFF (or any rasterio-readable raster).
         code_map: Optional override for translating BARC integer codes to the
-            canonical 0..4 severity scheme. Pixels with codes not present in
-            ``code_map`` are passed through unchanged.
+            canonical 0..4 severity scheme. When ``strict=True`` (default),
+            any code present in the raster but absent from the active code map
+            raises :class:`ValueError`.
         target_grid: Optional DataArray whose ``y`` and ``x`` coordinates and
             ``crs`` attribute / spatial_ref describe the destination grid.
             When supplied the BARC raster is reprojected to that grid using
             nearest-neighbour resampling.
+        strict: If ``True`` (default), raise :class:`ValueError` when the
+            raster contains codes not covered by the active code map. Set to
+            ``False`` to pass unmapped codes through with a warning instead.
 
     Returns:
         xr.DataArray with integer dtype, dims ``(y, x)``, and an attribute
@@ -880,6 +890,7 @@ def load_barc_reference(
 
     Raises:
         FileNotFoundError: If ``filepath`` does not exist.
+        ValueError: If ``strict=True`` and unmapped codes are found.
     """
     from pathlib import Path
 
@@ -911,9 +922,24 @@ def load_barc_reference(
         out = np.where(np.isnan(arr), -1, out.astype(np.int16))
 
     if mapping:
-        # Vectorised remap: build a lookup over the unique codes present so
-        # we don't allocate a 2**16-element table.
         unique_codes = np.unique(out)
+        unmapped = [
+            int(c)
+            for c in unique_codes
+            if int(c) not in mapping and int(c) != -1
+        ]
+        if unmapped:
+            counts = {
+                c: int(np.sum(out == c)) for c in unmapped
+            }
+            msg = (
+                f"Raster contains codes not in code_map: {counts}. "
+                "These codes will produce bogus classes in accuracy metrics. "
+                "Supply a complete code_map covering all codes in the raster."
+            )
+            if strict:
+                raise ValueError(msg)
+            logger.warning(msg)
         remapped = out.copy()
         for code in unique_codes:
             if int(code) in mapping:

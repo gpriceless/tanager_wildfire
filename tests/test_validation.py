@@ -19,6 +19,8 @@ Synthetic GeoTIFFs and DataArrays exercise:
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pytest
 import xarray as xr
@@ -471,6 +473,43 @@ class TestLoadBARCReference:
         da = validation.load_barc_reference(path, code_map=validation.SBS_CODE_MAP)
         expected = np.array([[-1, 1, 2], [3, 4, -1]], dtype=np.int16)
         np.testing.assert_array_equal(da.values, expected)
+
+    def test_unmapped_codes_raise_by_default(self, tmp_path):
+        codes = np.array([[1, 2], [3, 15]], dtype=np.int16)
+        path = tmp_path / "sbs_unmapped.tif"
+        self._write_barc_tif(path, codes)
+        with pytest.raises(ValueError, match="codes not in code_map.*15"):
+            validation.load_barc_reference(
+                path, code_map=validation.SBS_CODE_MAP
+            )
+
+    def test_unmapped_codes_passthrough_when_not_strict(self, tmp_path):
+        codes = np.array([[1, 2], [3, 15]], dtype=np.int16)
+        path = tmp_path / "sbs_lax.tif"
+        self._write_barc_tif(path, codes)
+        da = validation.load_barc_reference(
+            path, code_map=validation.SBS_CODE_MAP, strict=False
+        )
+        assert 15 in da.values
+
+    def test_unmapped_codes_warn_message(self, tmp_path, caplog):
+        codes = np.array([[1, 2], [3, 15]], dtype=np.int16)
+        path = tmp_path / "sbs_warn.tif"
+        self._write_barc_tif(path, codes)
+        with caplog.at_level(logging.WARNING, logger="tanager.validation"):
+            validation.load_barc_reference(
+                path, code_map=validation.SBS_CODE_MAP, strict=False
+            )
+        assert "15" in caplog.text
+        assert "codes not in code_map" in caplog.text
+
+    def test_complete_code_map_no_error(self, tmp_path):
+        codes = np.array([[0, 1], [4, 15]], dtype=np.int16)
+        path = tmp_path / "sbs_complete.tif"
+        self._write_barc_tif(path, codes)
+        full_map = {**validation.SBS_CODE_MAP, 15: -1}
+        da = validation.load_barc_reference(path, code_map=full_map)
+        assert da.values[1, 1] == -1
 
     def test_target_grid_alignment_same_crs(self, tmp_path):
         rasterio = pytest.importorskip("rasterio")
