@@ -6,6 +6,10 @@ Synthetic fraction grids with known CBI relationships exercise:
   reporting, NaN handling.
 * :func:`tanager.severity.predict_severity` — value-range clipping,
   classification thresholds, NaN propagation.
+* :func:`tanager.severity.calibrate_nbr_thresholds` — per-class NBR medians,
+  midpoint thresholds, monotonicity and min-pixel guards.
+* :func:`tanager.severity.classify_severity_from_nbr` — threshold application,
+  NBR/severity sign convention, NaN propagation.
 * :func:`tanager.severity.compute_trajectories` — multi-scene stacking with a
   ``time`` dimension.
 * :func:`tanager.severity.compare_severity_methods` — agreement metrics
@@ -177,6 +181,137 @@ class TestPredictSeverity:
 
         assert np.isnan(out["cbi_map"].values[0, 0])
         assert np.isnan(out["severity_map"].values[0, 0])
+
+
+# ---------------------------------------------------------------------------
+# calibrate_nbr_thresholds / classify_severity_from_nbr
+# ---------------------------------------------------------------------------
+
+
+def _nbr_and_reference(
+    class_medians: Tuple[float, ...] = (0.05, -0.20, -0.40),
+    *,
+    n_per_class: int = 60,
+    spread: float = 0.01,
+    rng_seed: int = 7,
+) -> Tuple[xr.DataArray, xr.DataArray]:
+    """Build an NBR map whose per-class medians are known by construction.
+
+    Class ``i`` occupies row ``i`` of the grid and is drawn tightly around
+    ``class_medians[i]``, so the calibrated thresholds must land near the
+    midpoints between consecutive medians.
+    """
+    rng = np.random.default_rng(rng_seed)
+    n_classes = len(class_medians)
+    nbr_rows = [
+        rng.normal(m, spread, size=n_per_class).astype(np.float64) for m in class_medians
+    ]
+    nbr_arr = np.stack(nbr_rows)
+    ref_arr = np.stack(
+        [np.full(n_per_class, code, dtype=np.int16) for code in range(n_classes)]
+    )
+    coords = {"y": np.arange(n_classes), "x": np.arange(n_per_class)}
+    nbr_da = xr.DataArray(nbr_arr, dims=("y", "x"), coords=coords, name="nbr")
+    ref_da = xr.DataArray(ref_arr, dims=("y", "x"), coords=coords, name="reference")
+    return nbr_da, ref_da
+
+
+class TestCalibrateNbrThresholds:
+    def test_thresholds_are_midpoints_of_class_medians(self):
+        nbr_da, ref_da = _nbr_and_reference(class_medians=(0.05, -0.20, -0.40))
+        cal = severity.calibrate_nbr_thresholds(nbr_da, ref_da)
+
+        assert cal["class_codes"] == (0, 1, 2)
+        assert cal["thresholds"].shape == (2,)
+        # midpoints of (0.05, -0.20) and (-0.20, -0.40)
+        np.testing.assert_allclose(cal["thresholds"], [-0.075, -0.30], atol=0.01)
+        assert cal["n_valid"] == 180
+
+    def test_nodata_and_nan_pixels_excluded(self):
+        nbr_da, ref_da = _nbr_and_reference()
+        # Negative reference codes are nodata; NaN NBR is unusable.
+        ref_da.values[0, :10] = -1
+        nbr_da.values[1, :5] = np.nan
+        cal = severity.calibrate_nbr_thresholds(nbr_da, ref_da)
+
+        assert cal["n_valid"] == 180 - 10 - 5
+        assert cal["n_pixels"][0] == 50
+        assert cal["n_pixels"][1] == 55
+
+    def test_sparse_class_dropped_below_min_pixels(self):
+        nbr_da, ref_da = _nbr_and_reference()
+        # Leave class 2 with only 3 pixels — too few to calibrate against.
+        ref_da.values[2, 3:] = -1
+        cal = severity.calibrate_nbr_thresholds(nbr_da, ref_da, min_pixels=50)
+
+        assert cal["class_codes"] == (0, 1)
+        assert 2 not in cal["medians"]
+        assert cal["thresholds"].shape == (1,)
+
+    def test_non_monotone_medians_rejected(self):
+        # Class 2 is *brighter* than class 1 — single-date NBR cannot order
+        # these classes, so calibration must refuse rather than emit a
+        # meaningless threshold.
+        nbr_da, ref_da = _nbr_and_reference(class_medians=(0.05, -0.40, -0.20))
+        with pytest.raises(ValueError, match="not strictly decreasing"):
+            severity.calibrate_nbr_thresholds(nbr_da, ref_da)
+
+    def test_shape_mismatch_rejected(self):
+        nbr_da, ref_da = _nbr_and_reference()
+        with pytest.raises(ValueError, match="shape mismatch"):
+            severity.calibrate_nbr_thresholds(nbr_da, ref_da.isel(x=slice(0, 5)))
+
+    def test_too_few_classes_rejected(self):
+        nbr_da, ref_da = _nbr_and_reference()
+        ref_da.values[1:, :] = -1
+        with pytest.raises(ValueError, match="need at least 2"):
+            severity.calibrate_nbr_thresholds(nbr_da, ref_da)
+
+
+class TestClassifySeverityFromNbr:
+    def test_recovers_reference_classes_on_calibration_data(self):
+        nbr_da, ref_da = _nbr_and_reference()
+        cal = severity.calibrate_nbr_thresholds(nbr_da, ref_da)
+        out = severity.classify_severity_from_nbr(nbr_da, cal)
+
+        # Classes are tightly separated, so round-tripping must be exact.
+        np.testing.assert_array_equal(out.values, ref_da.values.astype(np.float64))
+
+    def test_class_ordering_is_inverted_relative_to_nbr(self):
+        # High NBR must map to the least-severe class and low NBR to the most
+        # severe — the sign convention is the whole point of the function.
+        nbr_da, ref_da = _nbr_and_reference()
+        cal = severity.calibrate_nbr_thresholds(nbr_da, ref_da)
+        probe = xr.DataArray(
+            np.array([[0.5, -0.9]]),
+            dims=("y", "x"),
+            coords={"y": [0], "x": [0, 1]},
+        )
+        out = severity.classify_severity_from_nbr(probe, cal)
+
+        assert out.values[0, 0] == 0  # brightest → unburned
+        assert out.values[0, 1] == 2  # darkest → most severe
+
+    def test_nan_pixels_propagate_and_coords_preserved(self):
+        nbr_da, ref_da = _nbr_and_reference()
+        cal = severity.calibrate_nbr_thresholds(nbr_da, ref_da)
+        nbr_da.values[0, 0] = np.nan
+        out = severity.classify_severity_from_nbr(nbr_da, cal)
+
+        assert np.isnan(out.values[0, 0])
+        assert out.dims == nbr_da.dims
+        np.testing.assert_array_equal(out.coords["x"].values, nbr_da.coords["x"].values)
+
+    def test_inconsistent_calibration_rejected(self):
+        nbr_da, _ = _nbr_and_reference()
+        bad = {"class_codes": (0, 1, 2), "thresholds": np.array([0.0])}
+        with pytest.raises(ValueError, match="expected len\\(class_codes\\) - 1"):
+            severity.classify_severity_from_nbr(nbr_da, bad)
+
+    def test_missing_calibration_key_rejected(self):
+        nbr_da, _ = _nbr_and_reference()
+        with pytest.raises(ValueError, match="missing required key"):
+            severity.classify_severity_from_nbr(nbr_da, {"class_codes": (0, 1)})
 
 
 # ---------------------------------------------------------------------------

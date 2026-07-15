@@ -60,6 +60,8 @@ _LAZY_EXPORTS: dict[str, str] = {
     # severity -------------------------------------------------------------
     "train_severity_model": "severity",
     "predict_severity": "severity",
+    "calibrate_nbr_thresholds": "severity",
+    "classify_severity_from_nbr": "severity",
     "compute_trajectories": "severity",
     "compare_severity_methods": "severity",
     # lfmc -----------------------------------------------------------------

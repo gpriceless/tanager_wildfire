@@ -9,6 +9,11 @@ burn severity products following Quintano et al. (2023):
 * :func:`predict_severity` — apply a trained model to produce a continuous CBI
   map (clipped to [0, 3]) plus a 5-class BARC severity map (Unburned / Low /
   Moderate-Low / Moderate-High / High).
+* :func:`calibrate_nbr_thresholds` — derive NBR → severity-class thresholds
+  from a co-registered classified reference product (e.g. a BAER Soil Burn
+  Severity raster) via per-class NBR medians and their midpoints.
+* :func:`classify_severity_from_nbr` — apply calibrated thresholds to a
+  single-date NBR map to produce a classified severity map.
 * :func:`compute_trajectories` — run MESMA on a dictionary of dated scenes and
   stack the fraction outputs into a single time-series Dataset with dims
   (time, y, x).
@@ -23,6 +28,8 @@ Public API (lazy-imported via :mod:`tanager`):
 
 * :func:`train_severity_model`
 * :func:`predict_severity`
+* :func:`calibrate_nbr_thresholds`
+* :func:`classify_severity_from_nbr`
 * :func:`compute_trajectories`
 * :func:`compare_severity_methods`
 
@@ -397,6 +404,195 @@ def predict_severity(
     )
 
     return {"cbi_map": cbi_map, "severity_map": severity_map}
+
+
+# ---------------------------------------------------------------------------
+# Reference-calibrated NBR classification
+# ---------------------------------------------------------------------------
+
+
+def calibrate_nbr_thresholds(
+    nbr_map: Union[xr.DataArray, np.ndarray],
+    reference_classes: Union[xr.DataArray, np.ndarray],
+    *,
+    min_pixels: int = 50,
+) -> dict[str, Any]:
+    """Calibrate NBR → severity-class thresholds against a reference severity raster.
+
+    Given a single-date NBR map and a co-registered classified reference
+    product (e.g. a BAER Soil Burn Severity raster loaded via
+    :func:`tanager.validation.load_barc_reference`), compute the median NBR
+    within each reference class and place classification thresholds at the
+    midpoints between consecutive class medians. Because burned surfaces
+    depress NBR, medians must decrease as severity increases; the resulting
+    thresholds are returned in descending-NBR order.
+
+    Args:
+        nbr_map: 2-D NBR values (DataArray or ndarray).
+        reference_classes: Integer class codes on the same grid, ordered so
+            larger codes mean higher severity (e.g. 0=Unburned … 3=Mod-High).
+            Negative codes are treated as nodata. Classes that a single-date
+            NBR cannot separate (e.g. BAER High with few pixels) should be
+            merged into a neighbour via the ``code_map`` argument of
+            :func:`~tanager.validation.load_barc_reference` before calling.
+        min_pixels: Classes with fewer jointly-valid pixels than this are
+            dropped from the calibration (logged as a warning).
+
+    Returns:
+        Dict with keys:
+            ``class_codes``: tuple of retained class codes, ascending severity.
+            ``medians``: mapping of class code → median NBR (float).
+            ``n_pixels``: mapping of class code → jointly-valid pixel count.
+            ``thresholds``: ``(n_classes - 1,)`` float64 array of midpoint
+                thresholds in descending NBR order — ``thresholds[i]`` is the
+                boundary between ``class_codes[i]`` and ``class_codes[i+1]``.
+            ``n_valid``: total jointly-valid pixels used.
+
+    Raises:
+        ValueError: If the grids differ in shape, fewer than 2 classes
+            survive ``min_pixels`` filtering, or class medians are not
+            strictly decreasing with severity (merge the offending classes
+            and recalibrate).
+    """
+    nbr_v = np.asarray(
+        nbr_map.values if isinstance(nbr_map, xr.DataArray) else nbr_map,
+        dtype=np.float64,
+    )
+    ref_v = np.asarray(
+        reference_classes.values
+        if isinstance(reference_classes, xr.DataArray)
+        else reference_classes
+    )
+    if nbr_v.shape != ref_v.shape:
+        raise ValueError(
+            f"shape mismatch: nbr_map={nbr_v.shape} vs "
+            f"reference_classes={ref_v.shape} — align with "
+            "load_barc_reference(target_grid=...) first"
+        )
+
+    valid = np.isfinite(nbr_v) & np.isfinite(ref_v.astype(np.float64)) & (ref_v >= 0)
+    n_valid = int(valid.sum())
+
+    medians: dict[int, float] = {}
+    n_pixels: dict[int, int] = {}
+    for code in np.unique(ref_v[valid]).astype(int):
+        class_mask = valid & (ref_v == code)
+        n = int(class_mask.sum())
+        if n < min_pixels:
+            logger.warning(
+                "calibrate_nbr_thresholds: dropping class %d (%d px < min_pixels=%d)",
+                code,
+                n,
+                min_pixels,
+            )
+            continue
+        medians[int(code)] = float(np.median(nbr_v[class_mask]))
+        n_pixels[int(code)] = n
+
+    codes = tuple(sorted(medians))
+    if len(codes) < 2:
+        raise ValueError(
+            f"only {len(codes)} class(es) with >= {min_pixels} valid pixels; "
+            "need at least 2 to place a threshold"
+        )
+
+    med_seq = [medians[c] for c in codes]
+    if any(a <= b for a, b in zip(med_seq, med_seq[1:])):
+        raise ValueError(
+            "class NBR medians are not strictly decreasing with severity: "
+            + ", ".join(f"class {c}: {medians[c]:+.3f}" for c in codes)
+            + " — merge the non-separable classes (via load_barc_reference's "
+            "code_map) and recalibrate"
+        )
+
+    thresholds = np.array(
+        [(a + b) / 2.0 for a, b in zip(med_seq, med_seq[1:])], dtype=np.float64
+    )
+
+    logger.info(
+        "calibrate_nbr_thresholds: %d classes over %d px; medians=%s thresholds=%s",
+        len(codes),
+        n_valid,
+        {c: round(medians[c], 3) for c in codes},
+        np.round(thresholds, 3).tolist(),
+    )
+
+    return {
+        "class_codes": codes,
+        "medians": medians,
+        "n_pixels": n_pixels,
+        "thresholds": thresholds,
+        "n_valid": n_valid,
+    }
+
+
+def classify_severity_from_nbr(
+    nbr_map: xr.DataArray,
+    calibration: Mapping[str, Any],
+) -> xr.DataArray:
+    """Classify a single-date NBR map using reference-calibrated thresholds.
+
+    Args:
+        nbr_map: 2-D NBR DataArray (dims/coords are carried to the output).
+        calibration: Dict from :func:`calibrate_nbr_thresholds` — only the
+            ``class_codes`` and ``thresholds`` keys are required.
+
+    Returns:
+        Float64 DataArray of class codes (NaN where the input NBR is NaN),
+        same dims/coords as ``nbr_map``. Pixels exactly on a threshold are
+        assigned to the less-severe class.
+
+    Raises:
+        ValueError: If the calibration dict is missing keys or its sizes are
+            inconsistent (``len(thresholds) != len(class_codes) - 1``).
+    """
+    try:
+        codes = tuple(int(c) for c in calibration["class_codes"])
+        thresholds = np.asarray(calibration["thresholds"], dtype=np.float64)
+    except KeyError as exc:
+        raise ValueError(
+            f"calibration dict is missing required key {exc}; expected the "
+            "dict returned by calibrate_nbr_thresholds"
+        ) from None
+    if thresholds.size != len(codes) - 1:
+        raise ValueError(
+            f"calibration has {len(codes)} class codes but {thresholds.size} "
+            f"thresholds; expected len(class_codes) - 1"
+        )
+
+    nbr_v = np.asarray(nbr_map.values, dtype=np.float64)
+    finite = np.isfinite(nbr_v)
+
+    # thresholds are descending in NBR; digitize needs ascending bins. With
+    # k = len(thresholds), digitize returns k for NBR above every threshold
+    # (least severe) down to 0 below every threshold (most severe), so the
+    # class index is k - digitize(...).
+    ascending = thresholds[::-1]
+    class_flat = np.full(nbr_v.shape, np.nan, dtype=np.float64)
+    idx = np.digitize(nbr_v[finite], ascending, right=False)
+    code_lookup = np.asarray(codes, dtype=np.float64)
+    class_flat[finite] = code_lookup[thresholds.size - idx]
+
+    out = xr.DataArray(
+        class_flat,
+        dims=nbr_map.dims,
+        coords={k: nbr_map.coords[k] for k in nbr_map.dims if k in nbr_map.coords},
+        name="nbr_severity",
+        attrs={
+            "long_name": "nbr_threshold_severity_class",
+            "classification_system": "reference-calibrated single-date NBR",
+            "class_codes": ", ".join(str(c) for c in codes),
+            "thresholds_nbr_descending": ", ".join(f"{t:.4f}" for t in thresholds),
+        },
+    )
+
+    logger.info(
+        "classify_severity_from_nbr: classified %d px (%d NaN) into %d classes",
+        int(finite.sum()),
+        int((~finite).sum()),
+        len(codes),
+    )
+    return out
 
 
 # ---------------------------------------------------------------------------
