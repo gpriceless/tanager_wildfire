@@ -181,6 +181,26 @@ PRODUCT_STYLES: Dict[str, ProductStyle] = {
 # ---------------------------------------------------------------------------
 
 
+def _row_origin(da: xr.DataArray) -> str:
+    """Return the imshow ``origin`` that keeps a raster north-up.
+
+    ``imshow(extent=...)`` always places ``ymin`` at the bottom and ``ymax`` at
+    the top regardless of coordinate order, so the array's row 0 must be matched
+    to the correct edge. Tanager ortho rasters are north-up — a *descending* y
+    coordinate where row 0 is the northernmost line (``y[0] == ymax``) — which
+    needs ``origin="upper"``. An ascending y (row 0 == southmost) needs
+    ``"lower"``. Using a fixed ``"lower"`` mirrored descending-y rasters
+    vertically (their content, not their axes).
+    """
+    for name in ("y", "northing", "lat", "latitude"):
+        if name in da.coords:
+            y = da.coords[name].values
+            if len(y) > 1 and float(y[0]) > float(y[-1]):
+                return "upper"  # descending y: row 0 is northmost → top
+            return "lower"  # ascending y (or single row): row 0 is southmost
+    return "lower"  # no geographic y coord: preserve pixel-index behaviour
+
+
 def plot_map(
     da: xr.DataArray,
     title: str = "",
@@ -314,7 +334,7 @@ def plot_map(
     im = ax.imshow(
         arr,
         extent=extent,
-        origin="lower",
+        origin=_row_origin(da),
         cmap=cm_obj,
         vmin=vmin,
         vmax=vmax,
@@ -472,7 +492,7 @@ def plot_before_after(
         im = ax.imshow(
             arr,
             extent=ext,
-            origin="lower",
+            origin=_row_origin(da),
             cmap=cm_obj,
             vmin=vmin,
             vmax=vmax,
@@ -834,7 +854,7 @@ def plot_severity_summary(
         im = ax.imshow(
             arr,
             extent=ext,
-            origin="lower",
+            origin=_row_origin(da),
             cmap=cm_obj,
             vmin=vmin,
             vmax=vmax,
