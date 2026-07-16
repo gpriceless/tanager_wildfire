@@ -141,12 +141,10 @@ the trajectory to two overlap pairs instead of the full 7-date series; the pre-f
 does not overlap the Apr/Jul/Sep footprints, forcing the post-Jan recovery segment
 onto a secondary ("Hughes" footprint) pair.
 
-**Future work.** Obtain USGS/MTBS BARC rasters covering the Palisades footprint for
-same-fire validation; integrate AVIRIS-3 Eaton Fire MESMA products (ORNL DAAC,
-DOI:10.3334/ORNLDAAC/2357) for cross-sensor fraction validation; bundle a Globe-LFMC 2.0
-SoCal subset for real LFMC training; download the remaining cataloged scenes to complete the
-7-date recovery series on one consistent footprint; extend the sensor comparison to a
-Quintano-style field-CBI benchmark once field CBI plots are available.
+**Future work.** Bundle a Globe-LFMC 2.0 SoCal subset for real LFMC training (replacing
+synthetic targets); download the remaining cataloged scenes to complete the 7-date recovery
+series on one consistent footprint; extend the sensor comparison to a Quintano-style
+field-CBI benchmark once field CBI plots are available.
 
 ## References
 
