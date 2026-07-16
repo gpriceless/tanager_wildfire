@@ -36,7 +36,7 @@ Full derivations in [`notebooks/02-burn-severity.ipynb`](notebooks/02-burn-sever
 | Burn Severity | Temporal Recovery |
 | --- | --- |
 | ![Burn severity map](figures/severity_map.png) | ![Temporal recovery trajectory](figures/temporal_trajectory.png) |
-| MESMA-derived CBI / BARC severity classification over the Palisades/Eaton burn scar | NBR/NDVI/LFMC recovery trajectory across 4 Tanager scenes spanning 2 fire complexes (Palisades and Hughes), Dec 2024 – Apr 2025 |
+| MESMA-derived CBI / BARC severity classification over the Palisades burn scar | NBR/NDVI/LFMC recovery trajectory across 4 Tanager scenes spanning 2 fire complexes (Palisades and Hughes), Dec 2024 – Apr 2025 |
 
 | Live Fuel Moisture | Recovery by Severity Class |
 | --- | --- |
