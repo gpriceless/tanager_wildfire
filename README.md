@@ -57,8 +57,8 @@ sensors, and [`docs/technical-memo.md`](docs/technical-memo.md) for the full wri
 ## Installation
 
 ```bash
-git clone https://github.com/gpriceless/tanager_fire.git
-cd tanager_fire
+git clone https://github.com/gpriceless/tanager_wildfire.git
+cd tanager_wildfire
 pip install -e .
 ```
 
@@ -179,7 +179,7 @@ If you use FireSpec in your work, please cite it (see [`CITATION.cff`](CITATION.
   author  = {Price, Gabriel},
   title   = {{FireSpec}: Hyperspectral Wildfire Analysis for Planet Tanager-1 Imagery},
   year    = {2026},
-  url     = {https://github.com/gpriceless/tanager_fire},
+  url     = {https://github.com/gpriceless/tanager_wildfire},
   license = {MIT}
 }
 ```

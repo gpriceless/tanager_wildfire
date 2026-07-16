@@ -1,7 +1,7 @@
 # FireSpec: Hyperspectral Burn Severity and Live Fuel Moisture Mapping with Tanager-1
 
 **Technical Memo — Planet Tanager Open Data Competition**
-**Author:** gpriceless · **Repository:** github.com/gpriceless/tanager_fire (MIT License)
+**Author:** gpriceless · **Repository:** github.com/gpriceless/tanager_wildfire (MIT License)
 **Study area:** Palisades (ignited January 7, 2025) and Hughes (ignited January 22, 2025) Fires, Los Angeles, CA
 
 ---

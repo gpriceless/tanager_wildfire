@@ -10,7 +10,7 @@ abstract: >-
 authors:
   - family-names: Price
     given-names: Gabriel
-repository-code: "https://github.com/gpriceless/tanager_fire"
+repository-code: "https://github.com/gpriceless/tanager_wildfire"
 license: MIT
 version: 0.1.0
 date-released: "2026-07-09"
