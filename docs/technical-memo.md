@@ -45,10 +45,14 @@ dNBR locates the burn scar; a 300×284 px crop (66,167 valid pixels) centered on
 (USGS moderate-high threshold, Key & Benson 2006) is used for interactive MESMA. No external
 endmember library was available locally, so a 4-class library (char, PV, NPV, soil) is
 extracted directly from the image via percentile-based region selection. Fractions are
-normalized (shade removed, clamped, renormalized) and a Random-Forest regressor maps
-fractions to a Composite Burn Index (CBI) proxy, then to the 5-class BARC scheme. **Because
-no field CBI or MTBS/BARC raster was available locally, the RF training target is synthetic:
-CBI ≈ 3 × char fraction** — disclosed explicitly rather than presented as validated accuracy.
+normalized (shade removed, clamped, renormalized). A Random-Forest classifier maps the
+4-fraction feature vector (char, PV, NPV, soil) to severity classes, trained against a
+**BAER Soil Burn Severity (SBS)** raster for the neighbouring Hughes fire — a field-corrected,
+independently produced severity product imaged in the same Tanager overpass. MESMA is run on
+the Hughes scene with the same endmember library; cross-validated accuracy, Cohen's kappa,
+and per-class F1 are reported against the BAER reference. An earlier revision used a synthetic
+CBI proxy (CBI ≈ 3 × char fraction) as the training target; that has been replaced with real
+ground truth.
 
 **Live fuel moisture (LFMC).** On the Apr 7, 2025 scene (902,891 px, 75.8% valid), we compute
 narrowband water indices (SAI970, SAI1200, NDWI variants, WI) and continuum-removal depths at
@@ -72,14 +76,15 @@ vs. native).
 
 **Burn severity.** dNBR over the Palisades overlap (n=111,568) shows mean +0.211, median
 +0.113. The MESMA crop yields normalized mean fractions char=0.383, NPV=0.259, PV=0.248,
-soil=0.111. The RF proxy fits its synthetic target well (n=27,834, CV R²=0.998, RMSE=0.037
-CBI units) — expected, as it trains on a deterministic function of char fraction, not an
-independent measurement. The severity map classifies 55.7% of crop pixels unburned, 34.6%
-high severity, ~10% low/moderate. As an internal-consistency check (not ground-truth
-validation), CBI proxy vs. dNBR (n=21,495) shows only moderate correlation (r=0.365,
-RMSE=1.566, bias=+0.862), and dNBR-thresholded severity agrees with CBI-derived BARC classes
-at accuracy=0.353 (κ=0.137, macro-F1=0.208) — MESMA fractions and dNBR measure related but
-distinct signals, and the synthetic CBI target should not be read as field-validated accuracy.
+soil=0.111. A Random-Forest classifier trained on MESMA fractions against real BAER Soil Burn
+Severity ground truth (Hughes fire, same overpass) is cross-validated on the BAER reference;
+the trained model is then applied to the Palisades fractions. An NBR-threshold baseline
+(single-date NBR calibrated from BAER class medians) is reported alongside for comparison.
+The severity map classifies the Palisades crop into the BARC scheme using the RF classifier
+predictions. As an internal-consistency check (not ground-truth validation), MESMA char
+fraction vs. dNBR (n=21,495) shows correlation r=0.365 — MESMA fractions and dNBR measure
+related but distinct signals, and char fraction alone is not a severity product (dark
+non-vegetated surfaces confuse the image-derived char endmember).
 
 **Live fuel moisture.** SAI970 and SAI1200 average 0.073 and 0.076 across 683,948 valid
 pixels; continuum-removal depth peaks at 2100 nm (mean 0.234, p95 0.432), consistent with
@@ -123,11 +128,12 @@ below hyperspectral resolution — exactly what Tanager's 426 bands are built to
 magnitude (R²=0.99→0.36) is consistent with published PRISMA-vs-Sentinel-2 MESMA gaps
 (Quintano et al. 2023: R²=0.64–0.79 hyperspectral vs. 0.27–0.53 broadband against field CBI).
 
-**Limitations.** (1) The CBI severity target is synthetic (3×char fraction) — no field CBI or
-MTBS/BARC raster was available locally, so RF CV R²=0.998 reflects fit-to-proxy, not
-fit-to-ground-truth; the CBI-vs-dNBR consistency check (r=0.365) is a weaker but more honest
-signal of real skill. This limitation does not affect the sensor-comparison results, which
-validate against native Tanager rather than field data. (2) LFMC training used synthetic
+**Limitations.** (1) The RF severity classifier is trained on the Hughes fire BAER SBS and
+applied cross-fire to Palisades — accuracy on the target fire is not directly measured. The
+Hughes validation uses single-date NBR (no pre-fire baseline available), which is strictly
+harder than the Palisades case; cross-fire accuracy numbers should be read as lower bounds.
+This limitation does not affect the sensor-comparison results, which validate against native
+Tanager rather than field data. (2) LFMC training used synthetic
 spectra rather than Globe-LFMC 2.0 field observations, which were not bundled locally — the
 PLSR pipeline and VIP-band physical plausibility are validated, but R²=0.904 is not an
 independent accuracy estimate. (3) Only 4 of 11 cataloged scenes were downloaded, limiting
@@ -135,11 +141,12 @@ the trajectory to two overlap pairs instead of the full 7-date series; the pre-f
 does not overlap the Apr/Jul/Sep footprints, forcing the post-Jan recovery segment
 onto a secondary ("Hughes" footprint) pair.
 
-**Future work.** Integrate USGS/MTBS BARC rasters and AVIRIS-3 Eaton Fire MESMA products
-(ORNL DAAC, DOI:10.3334/ORNLDAAC/2357) for field-anchored severity validation; bundle a
-Globe-LFMC 2.0 SoCal subset for real LFMC training; download the remaining cataloged scenes
-to complete the 7-date recovery series on one consistent footprint; extend the sensor
-comparison to a Quintano-style field-CBI benchmark once ground truth is available.
+**Future work.** Obtain USGS/MTBS BARC rasters covering the Palisades footprint for
+same-fire validation; integrate AVIRIS-3 Eaton Fire MESMA products (ORNL DAAC,
+DOI:10.3334/ORNLDAAC/2357) for cross-sensor fraction validation; bundle a Globe-LFMC 2.0
+SoCal subset for real LFMC training; download the remaining cataloged scenes to complete the
+7-date recovery series on one consistent footprint; extend the sensor comparison to a
+Quintano-style field-CBI benchmark once field CBI plots are available.
 
 ## References
 

@@ -135,6 +135,76 @@ class TestTrainSeverityModel:
 
 
 # ---------------------------------------------------------------------------
+# train_severity_classifier
+# ---------------------------------------------------------------------------
+
+
+def _synthetic_fractions_and_classes(
+    rng_seed: int = 10,
+    *,
+    ny: int = 12,
+    nx: int = 12,
+) -> Tuple[xr.Dataset, np.ndarray]:
+    """Return (fractions, class_labels) where classes correlate with char."""
+    rng = np.random.default_rng(rng_seed)
+    n_pixels = ny * nx
+    fracs = rng.dirichlet(alpha=(1.0, 1.0, 1.0, 1.0), size=n_pixels).astype(np.float32)
+
+    char = fracs[:, 0].reshape(ny, nx)
+    pv = fracs[:, 1].reshape(ny, nx)
+    npv = fracs[:, 2].reshape(ny, nx)
+    soil = fracs[:, 3].reshape(ny, nx)
+
+    ds = _make_fraction_dataset(char, pv, npv, soil)
+
+    char_flat = char.ravel()
+    classes = np.digitize(char_flat, [0.15, 0.35, 0.60]).astype(np.int64)
+    return ds, classes
+
+
+class TestTrainSeverityClassifier:
+    def test_trains_classifier_and_returns_metrics(self):
+        ds, classes = _synthetic_fractions_and_classes(rng_seed=11)
+        result = severity.train_severity_classifier(
+            ds, classes, n_estimators=50, cv_folds=3,
+        )
+        assert result["model_type"] == "classifier"
+        assert "accuracy" in result
+        assert "kappa" in result
+        assert "f1_macro" in result
+        assert result["method"] == "random_forest"
+        assert result["n_samples"] == ds.sizes["y"] * ds.sizes["x"]
+        assert len(result["classes"]) >= 2
+
+    def test_nodata_pixels_excluded(self):
+        ds, classes = _synthetic_fractions_and_classes(rng_seed=12)
+        classes[0] = -1
+        classes[5] = -1
+        result = severity.train_severity_classifier(
+            ds, classes, n_estimators=50, cv_folds=3,
+        )
+        assert result["n_samples"] == ds.sizes["y"] * ds.sizes["x"] - 2
+
+    def test_nan_fractions_excluded(self):
+        ds, classes = _synthetic_fractions_and_classes(rng_seed=13)
+        ds["char"].values[0, 0] = np.nan
+        result = severity.train_severity_classifier(
+            ds, classes, n_estimators=50, cv_folds=3,
+        )
+        assert result["n_samples"] == ds.sizes["y"] * ds.sizes["x"] - 1
+
+    def test_unsupported_method_rejected(self):
+        ds, classes = _synthetic_fractions_and_classes()
+        with pytest.raises(ValueError, match="unsupported method"):
+            severity.train_severity_classifier(ds, classes, method="xgboost")
+
+    def test_size_mismatch_rejected(self):
+        ds, classes = _synthetic_fractions_and_classes()
+        with pytest.raises(ValueError, match="sizes must match"):
+            severity.train_severity_classifier(ds, classes[:5])
+
+
+# ---------------------------------------------------------------------------
 # predict_severity
 # ---------------------------------------------------------------------------
 
@@ -180,6 +250,27 @@ class TestPredictSeverity:
         out = severity.predict_severity(ds, trained)
 
         assert np.isnan(out["cbi_map"].values[0, 0])
+        assert np.isnan(out["severity_map"].values[0, 0])
+
+    def test_classifier_model_produces_classes(self):
+        ds, classes = _synthetic_fractions_and_classes(rng_seed=14)
+        trained = severity.train_severity_classifier(
+            ds, classes, n_estimators=50, cv_folds=3,
+        )
+        out = severity.predict_severity(ds, trained)
+        assert "severity_map" in out
+        assert "cbi_map" not in out
+        sev = out["severity_map"].values
+        finite_codes = sev[np.isfinite(sev)].astype(int)
+        assert set(finite_codes).issubset(set(trained["classes"]))
+
+    def test_classifier_nan_propagation(self):
+        ds, classes = _synthetic_fractions_and_classes(rng_seed=15)
+        trained = severity.train_severity_classifier(
+            ds, classes, n_estimators=50, cv_folds=3,
+        )
+        ds["char"].values[0, 0] = np.nan
+        out = severity.predict_severity(ds, trained)
         assert np.isnan(out["severity_map"].values[0, 0])
 
 

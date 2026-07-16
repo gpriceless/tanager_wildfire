@@ -5,10 +5,16 @@ burn severity products following Quintano et al. (2023):
 
 * :func:`train_severity_model` — fit a regressor (default RF) from a 4-feature
   fraction matrix to ground-truth Composite Burn Index (CBI) values, with
-  5-fold cross-validation R² / RMSE.
-* :func:`predict_severity` — apply a trained model to produce a continuous CBI
-  map (clipped to [0, 3]) plus a 5-class BARC severity map (Unburned / Low /
-  Moderate-Low / Moderate-High / High).
+  5-fold cross-validation R² / RMSE. Kept as a documented fallback for fires
+  where no classified reference product exists.
+* :func:`train_severity_classifier` — fit a classifier (default RF) from
+  a 4-feature fraction matrix to integer severity classes (e.g. BAER SBS),
+  with stratified 5-fold cross-validated accuracy / kappa / F1. This is the
+  primary training path when classified ground truth is available.
+* :func:`predict_severity` — apply a trained model (regressor or classifier)
+  to produce a severity map. Regressors produce a continuous CBI map plus a
+  BARC severity map via threshold binning; classifiers produce severity
+  classes directly.
 * :func:`calibrate_nbr_thresholds` — derive NBR → severity-class thresholds
   from a co-registered classified reference product (e.g. a BAER Soil Burn
   Severity raster) via per-class NBR medians and their midpoints.
@@ -27,6 +33,7 @@ is used.
 Public API (lazy-imported via :mod:`tanager`):
 
 * :func:`train_severity_model`
+* :func:`train_severity_classifier`
 * :func:`predict_severity`
 * :func:`calibrate_nbr_thresholds`
 * :func:`classify_severity_from_nbr`
@@ -267,8 +274,139 @@ def train_severity_model(
 
     return {
         "model": model,
+        "model_type": "regressor",
         "r2": r2,
         "rmse": rmse,
+        "method": method,
+        "feature_names": feats,
+        "n_samples": n_valid,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Classification against reference severity classes (e.g. BAER SBS)
+# ---------------------------------------------------------------------------
+
+
+def train_severity_classifier(
+    fractions: xr.Dataset,
+    reference_classes: Union[np.ndarray, xr.DataArray, Sequence[int]],
+    method: str = "random_forest",
+    *,
+    n_estimators: int = _DEFAULT_RF_N_ESTIMATORS,
+    random_state: int = _DEFAULT_RF_RANDOM_STATE,
+    cv_folds: int = _DEFAULT_CV_FOLDS,
+    feature_names: Optional[Sequence[str]] = None,
+    nodata: int = -1,
+) -> dict[str, Any]:
+    """Train a fraction → severity-class classifier with cross-validated metrics.
+
+    Unlike :func:`train_severity_model` (which targets continuous CBI), this
+    function trains a classifier against integer severity classes — typically
+    BAER Soil Burn Severity (SBS) codes loaded via
+    :func:`tanager.validation.load_barc_reference`.
+
+    Args:
+        fractions: xarray Dataset with each feature variable shaped (y, x).
+        reference_classes: Integer class codes aligned with the flattened pixel
+            order of ``fractions``.  Length must equal ``y * x``.  Pixels coded
+            ``nodata`` (default ``-1``) are excluded before training.
+        method: Currently ``"random_forest"`` is the only supported method.
+        n_estimators: Number of trees. Default 200.
+        random_state: Seed for determinism. Default 42.
+        cv_folds: K for stratified K-fold cross-validation. Default 5.
+        feature_names: Optional override of the feature variables.
+        nodata: Sentinel value in ``reference_classes`` that marks pixels to
+            exclude (default ``-1``).
+
+    Returns:
+        Dict with keys:
+            ``model``: trained ``RandomForestClassifier``.
+            ``model_type``: ``"classifier"`` (used by :func:`predict_severity`).
+            ``accuracy``: mean cross-validated overall accuracy (float).
+            ``kappa``: mean cross-validated Cohen's kappa (float).
+            ``f1_macro``: mean cross-validated macro F1 (float).
+            ``classes``: tuple of class codes the model predicts.
+            ``method``: the method string used.
+            ``feature_names``: tuple of feature variable names used.
+            ``n_samples``: number of valid pixels used for training.
+
+    Raises:
+        ValueError: If ``method`` is unsupported, features are missing, sizes
+            mismatch, or fewer than ``cv_folds`` valid pixels per class remain.
+    """
+    if method != "random_forest":
+        raise ValueError(
+            f"unsupported method {method!r}; only 'random_forest' is implemented"
+        )
+
+    feats = tuple(feature_names) if feature_names is not None else _SEVERITY_FEATURES
+    if not feats:
+        raise ValueError("feature_names must contain at least one variable")
+
+    X, _ = _flatten_fractions(fractions, feats)
+
+    if isinstance(reference_classes, xr.DataArray):
+        y = np.asarray(reference_classes.values).ravel()
+    else:
+        y = np.asarray(reference_classes).ravel()
+    y = y.astype(np.int64)
+
+    if y.size != X.shape[0]:
+        raise ValueError(
+            f"reference_classes has {y.size} entries but fractions have "
+            f"{X.shape[0]} pixels; sizes must match."
+        )
+
+    valid = np.all(np.isfinite(X), axis=1) & (y != nodata)
+    if np.issubdtype(y.dtype, np.floating):
+        valid &= np.isfinite(y.astype(np.float64))
+    n_valid = int(valid.sum())
+    if n_valid < cv_folds:
+        raise ValueError(
+            f"only {n_valid} valid pixels after filtering; need >= {cv_folds} "
+            "for cross-validation"
+        )
+
+    X_train = X[valid]
+    y_train = y[valid]
+
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.metrics import cohen_kappa_score, f1_score, make_scorer
+    from sklearn.model_selection import StratifiedKFold, cross_val_predict
+
+    from .config import parallel_jobs
+
+    model = RandomForestClassifier(
+        n_estimators=n_estimators,
+        random_state=random_state,
+        n_jobs=parallel_jobs(),
+    )
+
+    cv = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=random_state)
+    y_pred_cv = cross_val_predict(model, X_train, y_train, cv=cv)
+
+    accuracy = float(np.mean(y_pred_cv == y_train))
+    kappa = float(cohen_kappa_score(y_train, y_pred_cv))
+    f1_macro = float(f1_score(y_train, y_pred_cv, average="macro", zero_division=0))
+
+    model.fit(X_train, y_train)
+
+    classes = tuple(int(c) for c in model.classes_)
+
+    logger.info(
+        "train_severity_classifier: method=%s n_samples=%d cv_accuracy=%.4f "
+        "cv_kappa=%.4f cv_f1_macro=%.4f classes=%s",
+        method, n_valid, accuracy, kappa, f1_macro, classes,
+    )
+
+    return {
+        "model": model,
+        "model_type": "classifier",
+        "accuracy": accuracy,
+        "kappa": kappa,
+        "f1_macro": f1_macro,
+        "classes": classes,
         "method": method,
         "feature_names": feats,
         "n_samples": n_valid,
@@ -283,8 +421,13 @@ def train_severity_model(
 def _resolve_model(
     model: Any,
     feature_names: Optional[Sequence[str]],
-) -> Tuple[Any, Tuple[str, ...]]:
-    """Accept either the dict returned by :func:`train_severity_model` or a bare estimator."""
+) -> Tuple[Any, Tuple[str, ...], str]:
+    """Accept either the dict returned by :func:`train_severity_model` / :func:`train_severity_classifier` or a bare estimator.
+
+    Returns:
+        (estimator, feature_names, model_type) where model_type is
+        ``"regressor"`` or ``"classifier"``.
+    """
     if isinstance(model, Mapping):
         estimator = model.get("model")
         if estimator is None:
@@ -296,10 +439,12 @@ def _resolve_model(
             if feature_names is not None
             else tuple(model.get("feature_names", _SEVERITY_FEATURES))
         )
+        model_type = str(model.get("model_type", "regressor"))
     else:
         estimator = model
         feats = tuple(feature_names) if feature_names is not None else _SEVERITY_FEATURES
-    return estimator, feats
+        model_type = "regressor"
+    return estimator, feats, model_type
 
 
 def predict_severity(
@@ -346,28 +491,60 @@ def predict_severity(
         ValueError: If the model dict is missing the ``"model"`` key, or if
             a required feature variable is absent from ``fractions``.
     """
-    estimator, feats = _resolve_model(model, feature_names)
+    estimator, feats, model_type = _resolve_model(model, feature_names)
 
     X, spatial_shape = _flatten_fractions(fractions, feats)
     nan_mask = ~np.all(np.isfinite(X), axis=1)
+    valid = ~nan_mask
 
     # Replace NaN with 0 for prediction so sklearn does not warn / raise; we
     # restore NaN on those pixels immediately after prediction.
     X_safe = np.where(np.isnan(X), 0.0, X)
-    cbi_flat = np.asarray(estimator.predict(X_safe), dtype=np.float64)
-    cbi_flat = np.clip(cbi_flat, _CBI_MIN, _CBI_MAX)
-    cbi_flat[nan_mask] = np.nan
-
-    # BARC classification via np.digitize (left-closed bins by default).
-    edges = np.array([thresh for thresh, _code in _BARC_THRESHOLDS], dtype=np.float64)
-    severity_flat = np.full(cbi_flat.shape, np.nan, dtype=np.float64)
-    valid = ~nan_mask
-    severity_flat[valid] = np.digitize(cbi_flat[valid], edges, right=False).astype(np.float64)
 
     # Re-attach (y, x) dims and coords from the first feature variable.
     template = fractions[feats[0]]
     out_dims = template.dims
     out_coords = {name: template.coords[name] for name in out_dims if name in template.coords}
+
+    if model_type == "classifier":
+        # Classifier produces class codes directly — no CBI intermediary.
+        class_flat = np.asarray(estimator.predict(X_safe), dtype=np.float64)
+        class_flat[nan_mask] = np.nan
+
+        severity_map = xr.DataArray(
+            class_flat.reshape(spatial_shape),
+            dims=out_dims,
+            coords=out_coords,
+            name="barc_severity",
+            attrs={
+                "long_name": "barc_severity_class",
+                "classification_system": "BARC",
+                "class_codes": ", ".join(
+                    str(c) for c in sorted(estimator.classes_)
+                ),
+                "model_type": "classifier",
+                "reference": "trained against BAER SBS ground truth",
+            },
+        )
+
+        logger.info(
+            "predict_severity [classifier]: predicted %d pixels (%d NaN), "
+            "classes=%s",
+            int(valid.sum()),
+            int(nan_mask.sum()),
+            sorted(int(c) for c in estimator.classes_),
+        )
+
+        return {"severity_map": severity_map}
+
+    # Regressor path: predict continuous CBI, then bin to BARC classes.
+    cbi_flat = np.asarray(estimator.predict(X_safe), dtype=np.float64)
+    cbi_flat = np.clip(cbi_flat, _CBI_MIN, _CBI_MAX)
+    cbi_flat[nan_mask] = np.nan
+
+    edges = np.array([thresh for thresh, _code in _BARC_THRESHOLDS], dtype=np.float64)
+    severity_flat = np.full(cbi_flat.shape, np.nan, dtype=np.float64)
+    severity_flat[valid] = np.digitize(cbi_flat[valid], edges, right=False).astype(np.float64)
 
     cbi_map = xr.DataArray(
         cbi_flat.reshape(spatial_shape),

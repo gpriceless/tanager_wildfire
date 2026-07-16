@@ -59,6 +59,7 @@ _LAZY_EXPORTS: dict[str, str] = {
     "plot_rgb_composite": "unmixing",
     # severity -------------------------------------------------------------
     "train_severity_model": "severity",
+    "train_severity_classifier": "severity",
     "predict_severity": "severity",
     "calibrate_nbr_thresholds": "severity",
     "classify_severity_from_nbr": "severity",

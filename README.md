@@ -23,7 +23,7 @@ against EMIT, PRISMA, and Sentinel-2 using the 2025 LA wildfires as the case stu
 
 | Model | Metric | Value |
 | --- | --- | --- |
-| Burn severity (Random Forest, 5-fold CV) | R² / RMSE | **0.998** / **0.037** CBI units (synthetic ground truth) |
+| Burn severity (RF classifier vs BAER SBS, 5-fold CV) | ground truth | **BAER Soil Burn Severity** (Hughes fire) |
 | Live fuel moisture (PLSR, 5-fold CV) | R² / RMSE | **0.904** / **15.3%** LFMC |
 | MESMA char. (fire-fuel) fraction R² — EMIT (285 bands, 7.4 nm) | R² vs. native Tanager-1 | **0.991** |
 | MESMA char. (fire-fuel) fraction R² — PRISMA (239 bands, 12 nm) | R² vs. native Tanager-1 | **0.957** |
@@ -36,7 +36,7 @@ Full derivations in [`notebooks/02-burn-severity.ipynb`](notebooks/02-burn-sever
 | Burn Severity | Temporal Recovery |
 | --- | --- |
 | ![Burn severity map](figures/severity_map.png) | ![Temporal recovery trajectory](figures/temporal_trajectory.png) |
-| MESMA-derived CBI / BARC severity classification over the Palisades burn scar | NBR/NDVI/LFMC recovery trajectory across 4 Tanager scenes spanning 2 fire complexes (Palisades and Hughes), Dec 2024 – Apr 2025 |
+| MESMA-derived BARC severity classification over the Palisades burn scar (RF classifier trained on BAER SBS ground truth) | NBR/NDVI/LFMC recovery trajectory across 4 Tanager scenes spanning 2 fire complexes (Palisades and Hughes), Dec 2024 – Apr 2025 |
 
 | Live Fuel Moisture | Recovery by Severity Class |
 | --- | --- |
@@ -119,7 +119,7 @@ LFMC estimation, temporal trajectories, sensor comparison).
 | Notebook | Description |
 | --- | --- |
 | [`01-data-discovery.ipynb`](notebooks/01-data-discovery.ipynb) | STAC catalog traversal and scene inventory — discovering and cataloging the LA wildfire time series |
-| [`02-burn-severity.ipynb`](notebooks/02-burn-severity.ipynb) | MESMA spectral unmixing and CBI/BARC burn severity estimation, with internal-consistency validation against dNBR (framework supports USGS BARC ground truth when reference data is available) |
+| [`02-burn-severity.ipynb`](notebooks/02-burn-severity.ipynb) | MESMA spectral unmixing and BARC burn severity classification, trained against real BAER Soil Burn Severity ground truth (Hughes fire), with RF classifier and NBR-threshold baseline comparison |
 | [`03-fuel-moisture.ipynb`](notebooks/03-fuel-moisture.ipynb) | LFMC estimation via spectral water indices (SAI, continuum removal) and PLSR regression |
 | [`04-temporal-recovery.ipynb`](notebooks/04-temporal-recovery.ipynb) | Multi-temporal vegetation recovery trajectories across 4 downloaded Tanager scenes forming 2 disjoint fire-complex pairs (Palisades and Hughes), Dec 2024 – Apr 2025 |
 | [`05-sensor-comparison.ipynb`](notebooks/05-sensor-comparison.ipynb) | Tanager-1 vs EMIT / PRISMA / Sentinel-2 spectral degradation and information-loss analysis |
