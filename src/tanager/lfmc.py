@@ -445,24 +445,40 @@ def compute_lfmc_indices(scene: Any) -> xr.Dataset:
 # CSV uses ``Latitude``/``Longitude``/``Date``/``LFMC_value`` etc.; some
 # downstream redistributions strip casing or rename. We normalize once at load.
 _GLOBE_LFMC_COLUMN_ALIASES: Mapping[str, Tuple[str, ...]] = {
-    "latitude": ("latitude", "lat"),
-    "longitude": ("longitude", "lon", "long", "lng"),
-    "date": ("date", "observation_date", "sampling_date", "obs_date"),
+    "latitude": ("latitude", "lat", "latitude (wgs84, epsg:4326)"),
+    "longitude": ("longitude", "lon", "long", "lng", "longitude (wgs84, epsg:4326)"),
+    "date": (
+        "date",
+        "observation_date",
+        "sampling_date",
+        "obs_date",
+        "sampling date (yyyymmdd)",
+    ),
     "lfmc_percent": (
         "lfmc_percent",
         "lfmc",
         "lfmc_value",
         "lfmc_%",
         "live_fuel_moisture",
+        "lfmc value (%)",
     ),
-    "species": ("species", "species_name", "scientific_name"),
-    "site_name": ("site_name", "site", "sitename", "location_name", "location"),
+    "species": ("species", "species_name", "scientific_name", "species collected"),
+    "site_name": (
+        "site_name",
+        "site",
+        "sitename",
+        "location_name",
+        "location",
+        "site name",
+    ),
     "vegetation_type": (
         "vegetation_type",
         "veg_type",
         "vegetation",
         "land_cover",
         "vegetation_class",
+        "species functional type",
+        "igbp land cover",
     ),
 }
 
@@ -486,20 +502,21 @@ def load_globe_lfmc(
     vegetation_types: Optional[Sequence[str]] = None,
     tanager_scene_dates: Optional[Sequence[Any]] = None,
     colocation_window_days: int = 30,
+    lfmc_range: Optional[Tuple[float, float]] = None,
 ) -> Any:
     """Load Globe-LFMC 2.0 observations as a filtered GeoDataFrame.
 
     Globe-LFMC 2.0 (Yebra et al. 2024, DOI 10.1038/s41597-024-03159-6) is the
     canonical global database of in-situ live fuel moisture observations. This
-    function reads the published CSV (or any file ``pandas.read_csv`` can
-    consume), normalizes the column names against
-    ``_GLOBE_LFMC_COLUMN_ALIASES``, applies optional spatial / vegetation
-    filters, and returns a GeoPandas GeoDataFrame ready for
-    :func:`train_lfmc_plsr` ground-truth assembly.
+    function reads the published CSV or xlsx, normalizes the column names
+    against ``_GLOBE_LFMC_COLUMN_ALIASES``, applies optional spatial /
+    vegetation / LFMC-range filters, and returns a GeoPandas GeoDataFrame ready
+    for :func:`train_lfmc_plsr` ground-truth assembly.
 
     Args:
-        data_path: Path to the Globe-LFMC CSV (or any file ``pandas.read_csv``
-            can read). Must exist on disk; this loader does not download.
+        data_path: Path to the Globe-LFMC file (CSV or xlsx). For xlsx files,
+            the ``LFMC data`` sheet is read automatically. Must exist on disk;
+            this loader does not download.
         region_bbox: Optional ``(west, south, east, north)`` bounding box in
             WGS84 degrees. Observations outside the box are dropped.
         vegetation_types: Optional list of vegetation-type strings used as
@@ -511,6 +528,9 @@ def load_globe_lfmc(
             True iff its observation date falls within
             ``colocation_window_days`` of *any* scene date.
         colocation_window_days: Half-window for the colocation flag. Default 30.
+        lfmc_range: Optional ``(min, max)`` LFMC percent filter. Observations
+            outside this range are dropped. Useful for removing Globe-LFMC 2.0
+            outliers (the dataset contains a handful of values >10,000%).
 
     Returns:
         ``geopandas.GeoDataFrame`` with EPSG:4326 geometry and at least the
@@ -534,11 +554,14 @@ def load_globe_lfmc(
     if not path.exists():
         raise FileNotFoundError(
             f"Globe-LFMC data not found at {path}. Download from "
-            "https://doi.org/10.6084/m9.figshare.24745469 or pass an "
-            "alternative local CSV path."
+            "https://doi.org/10.6084/m9.figshare.c.6980418 or pass an "
+            "alternative local path."
         )
 
-    df = pd.read_csv(path)
+    if path.suffix.lower() in (".xlsx", ".xls"):
+        df = pd.read_excel(path, sheet_name="LFMC data")
+    else:
+        df = pd.read_csv(path, low_memory=False)
     rename = _normalize_globe_lfmc_columns(df.columns)
     if rename:
         df = df.rename(columns=rename)
@@ -556,6 +579,10 @@ def load_globe_lfmc(
     df["latitude"] = df["latitude"].astype(float)
     df["longitude"] = df["longitude"].astype(float)
     df["lfmc_percent"] = df["lfmc_percent"].astype(float)
+
+    if lfmc_range is not None:
+        lo, hi = lfmc_range
+        df = df[(df["lfmc_percent"] >= lo) & (df["lfmc_percent"] <= hi)]
 
     if region_bbox is not None:
         west, south, east, north = region_bbox

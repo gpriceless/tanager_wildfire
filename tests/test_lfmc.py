@@ -409,6 +409,87 @@ class TestLoadGlobeLFMC:
         df.to_csv(path, index=False)
         return str(path)
 
+    def _write_published_schema_csv(self, tmp_path) -> str:
+        """A CSV using Globe-LFMC 2.0's *published* column headers verbatim.
+
+        The other fixtures use short aliases (``lat``, ``lfmc``). The real
+        release ships parenthesised, space-separated headers, which is what a
+        user actually downloads from the Figshare collection.
+        """
+        import pandas as pd
+
+        df = pd.DataFrame(
+            {
+                "Latitude (WGS84, EPSG:4326)": [34.05, 34.10, 35.00],
+                "Longitude (WGS84, EPSG:4326)": [-118.25, -118.30, -119.00],
+                "Sampling date (YYYYMMDD)": ["2024-12-01", "2025-01-15", "2025-03-01"],
+                "LFMC value (%)": [120.0, 80.0, 65.0],
+                "Species collected": ["Adenostoma", "Ceanothus", "Bromus"],
+                "Species functional type": ["Shrub", "Shrub", "Grass"],
+                "Site name": ["Clear Creek", "Bitter Canyon", "Del Valle"],
+            }
+        )
+        path = tmp_path / "globe_lfmc_published.csv"
+        df.to_csv(path, index=False)
+        return str(path)
+
+    def test_reads_published_globe_lfmc_2_column_headers(self, tmp_path):
+        """The loader parses the headers Globe-LFMC 2.0 actually ships with.
+
+        Regression guard: the alias table originally only knew short forms like
+        ``lat``/``lfmc``, so the published release raised on load and the real
+        dataset could not be used at all.
+        """
+        pytest.importorskip("geopandas")
+        path = self._write_published_schema_csv(tmp_path)
+
+        gdf = lfmc.load_globe_lfmc(path)
+
+        assert len(gdf) == 3
+        assert {"latitude", "longitude", "date", "lfmc_percent", "site_name"}.issubset(
+            gdf.columns
+        )
+        assert gdf["lfmc_percent"].tolist() == [120.0, 80.0, 65.0]
+        assert gdf["site_name"].tolist() == ["Clear Creek", "Bitter Canyon", "Del Valle"]
+
+    def test_lfmc_range_filter_drops_out_of_range_observations(self, tmp_path):
+        pytest.importorskip("geopandas")
+        path = self._write_published_schema_csv(tmp_path)
+
+        gdf = lfmc.load_globe_lfmc(path, lfmc_range=(70.0, 130.0))
+
+        # 65% falls below the floor and is dropped; 120 and 80 survive.
+        assert sorted(gdf["lfmc_percent"].tolist()) == [80.0, 120.0]
+
+    def test_colocation_flag_is_false_when_no_observation_is_near_a_scene(self, tmp_path):
+        """The flag is the guard against pairing a spectrum with a stale target.
+
+        Globe-LFMC's SoCal record ends well before the 2025 scenes, so a real
+        colocation check has nothing to match. Asserting the negative here keeps
+        the flag honest: it must not quietly report True.
+        """
+        pytest.importorskip("geopandas")
+        import pandas as pd
+
+        path = self._write_published_schema_csv(tmp_path)
+
+        gdf = lfmc.load_globe_lfmc(
+            path,
+            tanager_scene_dates=[pd.Timestamp("2025-04-07")],
+            colocation_window_days=30,
+        )
+        # Nearest observation is 2025-03-01, 37 days out — outside the window.
+        assert not gdf["tanager_colocated"].any()
+
+        wide = lfmc.load_globe_lfmc(
+            path,
+            tanager_scene_dates=[pd.Timestamp("2025-04-07")],
+            colocation_window_days=45,
+        )
+        # Widening the window past 37 days must pick that observation up, so the
+        # False above is a real verdict rather than a flag that never fires.
+        assert wide["tanager_colocated"].sum() == 1
+
     def test_normalizes_columns_and_filters_bbox(self, tmp_path):
         pytest.importorskip("geopandas")
         path = self._write_csv(tmp_path)
@@ -457,6 +538,33 @@ class TestLoadGlobeLFMC:
         colocated = gdf[gdf["tanager_colocated"]]
         assert len(colocated) == 1
         assert str(colocated["date"].iloc[0]).startswith("2025-01-15")
+
+    def test_xlsx_loading(self, tmp_path):
+        pytest.importorskip("geopandas")
+        import pandas as pd
+
+        df = pd.DataFrame(
+            {
+                "lat": [34.05, 34.10],
+                "lon": [-118.25, -118.30],
+                "obs_date": ["2024-12-01", "2025-01-15"],
+                "lfmc": [120.0, 80.0],
+                "species": ["Adenostoma", "Ceanothus"],
+            }
+        )
+        path = tmp_path / "globe_lfmc.xlsx"
+        df.to_excel(path, sheet_name="LFMC data", index=False)
+        gdf = lfmc.load_globe_lfmc(path)
+        assert len(gdf) == 2
+        assert {"latitude", "longitude", "date", "lfmc_percent"}.issubset(gdf.columns)
+
+    def test_lfmc_range_filter(self, tmp_path):
+        pytest.importorskip("geopandas")
+        path = self._write_csv(tmp_path)
+        gdf = lfmc.load_globe_lfmc(path, lfmc_range=(50.0, 100.0))
+        assert len(gdf) == 2
+        assert gdf["lfmc_percent"].min() >= 50.0
+        assert gdf["lfmc_percent"].max() <= 100.0
 
     def test_missing_file_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError):
