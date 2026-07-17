@@ -63,3 +63,6 @@ research/pdfs/*.pdf
 # notebook 03 prints download-and-place instructions when it is absent. Bundling it
 # would more than triple the size of a clone for data every user can fetch directly.
 data/reference/globe_lfmc/
+
+# Notebook-suite run logs are local run records, not deliverables.
+outputs/notebook-suite/
