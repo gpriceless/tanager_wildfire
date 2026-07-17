@@ -372,7 +372,7 @@ def train_severity_classifier(
     y_train = y[valid]
 
     from sklearn.ensemble import RandomForestClassifier
-    from sklearn.metrics import cohen_kappa_score, f1_score, make_scorer
+    from sklearn.metrics import cohen_kappa_score, f1_score
     from sklearn.model_selection import StratifiedKFold, cross_val_predict
 
     from .config import parallel_jobs
