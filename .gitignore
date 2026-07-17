@@ -57,3 +57,9 @@ data/raw/aviris3/*
 
 # Manually-staged research PDFs (license varies — opt in by removing this rule)
 research/pdfs/*.pdf
+
+# The Globe-LFMC 2.0 compilation (~220 MB of .xlsx + .csv) stays out of git. It is
+# published under CC BY 4.0 at https://doi.org/10.6084/m9.figshare.c.6980418, and
+# notebook 03 prints download-and-place instructions when it is absent. Bundling it
+# would more than triple the size of a clone for data every user can fetch directly.
+data/reference/globe_lfmc/
