@@ -1,0 +1,167 @@
+{
+  "version": 1,
+  "generated_from": "src/tanager/provenance.py",
+
+  "artifacts": {
+    "baer_hughes_sbs": {
+      "path": "data/reference/baer/hughes_sbs.tif",
+      "description": "BAER Soil Burn Severity raster, Hughes fire (Jan 2025)",
+      "source_url": "https://burnseverity.cr.usgs.gov/baer/",
+      "doi": null,
+      "checksum_md5": "910f02a999989bc63bde846b2f06e489",
+      "size_bytes": 197801,
+      "retrieved": null,
+      "license": "US federal government work (17 U.S.C. § 105)",
+      "bundled": true,
+      "provenance_status": "unverifiable",
+      "provenance_note": "File carries no metadata beyond DataType=Generic / AREA_OR_POINT=Area. Cannot be checksum-matched against a specific BAER publication. Class coding was established by inspecting spatial structure and per-class Tanager NBR, not from documentation. See data/reference/baer/README.md."
+    },
+
+    "globe_lfmc_xlsx": {
+      "path": "data/reference/globe_lfmc/Globe-LFMC-2.0.xlsx",
+      "description": "Globe-LFMC 2.0 field observation database (xlsx release)",
+      "source_url": "https://doi.org/10.6084/m9.figshare.c.6980418",
+      "doi": "10.1038/s41597-024-03159-6",
+      "checksum_md5": "57a2c99f82db84810cdf6acc13aef0e4",
+      "size_bytes": null,
+      "retrieved": null,
+      "license": "CC BY 4.0",
+      "bundled": false,
+      "provenance_status": "verified",
+      "provenance_note": "Published dataset with DOI; checksum taken from the local copy."
+    },
+
+    "globe_lfmc_csv": {
+      "path": "data/reference/globe_lfmc/globe_lfmc.csv",
+      "description": "Globe-LFMC 2.0 field observation database (CSV extract)",
+      "source_url": "https://doi.org/10.6084/m9.figshare.c.6980418",
+      "doi": "10.1038/s41597-024-03159-6",
+      "checksum_md5": "805206ef3aeee3c4c9b7306b1e4c648b",
+      "size_bytes": null,
+      "retrieved": null,
+      "license": "CC BY 4.0",
+      "bundled": false,
+      "provenance_status": "verified",
+      "provenance_note": "CSV conversion of the xlsx; see globe_lfmc_xlsx for the authoritative source."
+    },
+
+    "dins_palisades": {
+      "path": "data/reference/dins/palisades_dins.geojson",
+      "description": "CAL FIRE DINS structure-damage survey, Palisades fire (Jan 2025)",
+      "source_url": "https://data.ca.gov",
+      "doi": null,
+      "checksum_md5": "718652c5e7090148d682d02f4407d21a",
+      "size_bytes": 3248285,
+      "retrieved": null,
+      "license": "California public records",
+      "bundled": true,
+      "provenance_status": "verified",
+      "provenance_note": "Published by CAL FIRE per incident via the DINS viewer."
+    },
+
+    "aviris3_reflectance": {
+      "path": "data/raw/aviris3/AV3*_RFL_ORT.nc",
+      "description": "AVIRIS-3 L2A surface-reflectance NetCDF granules, Jan 23 2025 Palisades overpass",
+      "source_url": "https://daac.ornl.gov/",
+      "doi": "10.3334/ORNLDAAC/2357",
+      "checksum_md5": null,
+      "size_bytes": null,
+      "retrieved": null,
+      "license": "NASA EOSDIS data policy",
+      "bundled": false,
+      "provenance_status": "verified",
+      "provenance_note": "ORNL DAAC archive with DOI. Granule URLs listed in data/raw/aviris3/aviris3_jan23_palisades_urls.txt."
+    },
+
+    "tanager_scenes": {
+      "path": "data/raw/fire/*.h5",
+      "description": "Tanager-1 ortho_sr HDF5 scenes from the Planet Tanager Open Data Competition",
+      "source_url": "https://www.planet.com/tanager-open-data-competition/",
+      "doi": null,
+      "checksum_md5": null,
+      "size_bytes": null,
+      "retrieved": null,
+      "license": "Planet Tanager Open Data Competition terms",
+      "bundled": false,
+      "provenance_status": "verified",
+      "provenance_note": "Retrieved via Planet STAC catalog. Scenes are too large to bundle (~1.3 GB each)."
+    }
+  },
+
+  "claims": {
+    "nb02_hughes_kappa": {
+      "notebook": "notebooks/02-burn-severity.ipynb",
+      "section": "7. Validation against BAER ground truth",
+      "description": "Cohen's kappa for RF severity classifier on Hughes BAER SBS",
+      "metric": "Cohen's kappa",
+      "value": 0.527,
+      "backing_artifact": "baer_hughes_sbs",
+      "independence": "partial",
+      "independence_note": "BAER SBS class labels were established by inspecting per-class Tanager NBR (the quantity being predicted). The reference is external but the class coding is partly circular.",
+      "synthetic": false
+    },
+
+    "nb02_dins_spearman": {
+      "notebook": "notebooks/02-burn-severity.ipynb",
+      "section": "7.1 Structure-level cross-check — CAL FIRE DINS",
+      "description": "Spearman rho between dNBR and DINS structure damage ordinal",
+      "metric": "Spearman rho",
+      "value": null,
+      "backing_artifact": "dins_palisades",
+      "independence": "independent",
+      "independence_note": "DINS is a field-collected, structure-level reference entirely independent of Tanager imagery.",
+      "synthetic": false
+    },
+
+    "nb03_lfmc_plsr_synthetic": {
+      "notebook": "notebooks/03-fuel-moisture.ipynb",
+      "section": "4. PLSR Regression (synthetic fallback)",
+      "description": "Cross-validated R² for PLSR trained on inject_water_absorption() synthetic targets",
+      "metric": "cv_r2",
+      "value": 0.904,
+      "backing_artifact": null,
+      "independence": "none",
+      "independence_note": "Training targets generated by inject_water_absorption() using rng.uniform(30,200). The model inverts a formula written in the same notebook. This metric demonstrates methodology, not accuracy.",
+      "synthetic": true
+    },
+
+    "nb03_lfmc_plsr_real": {
+      "notebook": "notebooks/03-fuel-moisture.ipynb",
+      "section": "4. PLSR Regression (Globe-LFMC real data)",
+      "description": "Cross-validated R² for PLSR trained on Globe-LFMC 2.0 field observations",
+      "metric": "cv_r2",
+      "value": null,
+      "backing_artifact": "globe_lfmc_xlsx",
+      "independence": "conditional",
+      "independence_note": "Independent only if Globe-LFMC sites are temporally colocated with Tanager scenes. load_globe_lfmc() with scene dates returns 0 of 18,624 colocated (SoCal record ends 2023-01-30; scenes are Dec 2024 - Apr 2025). Without colocation the spatial pairing is defensible but the temporal gap (~2 years) weakens the referent.",
+      "synthetic": false
+    },
+
+    "nb05_cross_sensor_char": {
+      "notebook": "notebooks/05-sensor-comparison.ipynb",
+      "section": "7. MESMA Comparison",
+      "description": "Cross-sensor MESMA char fraction comparison (Tanager vs simulated EMIT/PRISMA)",
+      "metric": "R2",
+      "value": null,
+      "backing_artifact": "tanager_scenes",
+      "independence": "self_referencing",
+      "independence_note": "Both sensors are simulated from the same Tanager reflectance cube via spectral degradation. This compares information loss, not independent measurements.",
+      "synthetic": false
+    }
+  },
+
+  "climatology": {
+    "globe_lfmc_socal_shrub_monthly_median": {
+      "source": "Globe-LFMC 2.0, SoCal bbox (-119.5, 33.5, -117.0, 35.0), shrub vegetation",
+      "doi": "10.1038/s41597-024-03159-6",
+      "unit": "percent_dry_mass",
+      "values": {
+        "1": 76, "2": 94, "3": 113, "4": 119,
+        "5": 105, "6": 86, "7": 73, "8": 65,
+        "9": 61, "10": 60, "11": 63, "12": 70
+      },
+      "tolerance_factor": 2.0,
+      "note": "A predicted LFMC mean outside [median / tolerance_factor, median * tolerance_factor] for the scene month is implausible and should fail the gate."
+    }
+  }
+}
