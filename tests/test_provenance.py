@@ -351,28 +351,36 @@ class TestCircularDependencyScan:
     ]
 
     def test_inject_water_absorption_is_flagged(self, manifest):
-        """NB03 uses inject_water_absorption() — the claim must be in
-        the manifest and marked synthetic."""
+        """The synthetic LFMC path was removed from NB03. This test is
+        the guard that keeps it out: if inject_water_absorption() (or any
+        synthetic LFMC training target) ever returns to the notebook, a
+        matching synthetic-labelled claim must exist in the manifest.
+
+        NB03 now ships spectral water indices only; the calibrated LFMC
+        regression is gated behind a data-availability assessment rather
+        than trained on a self-generated target."""
         nb03 = NOTEBOOKS_DIR / "03-fuel-moisture.ipynb"
         if not nb03.exists():
             pytest.skip("Notebook 03 not found")
 
         source = self._notebook_source(nb03)
-        assert "inject_water_absorption" in source, (
-            "inject_water_absorption not found in NB03 — "
-            "if it was removed, update the manifest too"
-        )
+        if "inject_water_absorption" not in source:
+            # Expected steady state: synthetic path is gone, and no
+            # synthetic PLSR claim should linger in the manifest.
+            assert "nb03_lfmc_plsr_synthetic" not in manifest["claims"], (
+                "inject_water_absorption() is no longer in NB03 but a "
+                "nb03_lfmc_plsr_synthetic claim still exists — remove the "
+                "stale synthetic claim from the manifest"
+            )
+            return
 
+        # Regression guard: if the synthetic path ever comes back, it
+        # must be declared as a synthetic claim.
         claim = manifest["claims"].get("nb03_lfmc_plsr_synthetic")
-        assert claim is not None, (
-            "inject_water_absorption() found in NB03 but no "
-            "nb03_lfmc_plsr_synthetic claim in the manifest — "
-            "every synthetic training path must have a claim entry"
-        )
-        assert claim.get("synthetic", False), (
-            "nb03_lfmc_plsr_synthetic exists but is not marked "
-            "synthetic=true — inject_water_absorption() generates "
-            "the targets the model is trained to predict"
+        assert claim is not None and claim.get("synthetic", False), (
+            "inject_water_absorption() found in NB03 but no synthetic "
+            "nb03_lfmc_plsr_synthetic claim in the manifest — every "
+            "synthetic training path must have a synthetic claim entry"
         )
 
     def test_no_cbi_formula_in_notebooks(self, manifest):
