@@ -91,13 +91,13 @@
   "claims": {
     "nb02_hughes_kappa": {
       "notebook": "notebooks/02-burn-severity.ipynb",
-      "section": "7. Validation against BAER ground truth",
-      "description": "Cohen's kappa for RF severity classifier on Hughes BAER SBS",
+      "section": "7. Validation against BAER ground truth (5-class, code 4 kept separate)",
+      "description": "Cohen's kappa for RF severity classifier on Hughes BAER SBS — provisional",
       "metric": "Cohen's kappa",
-      "value": 0.527,
+      "value": null,
       "backing_artifact": "baer_hughes_sbs",
       "independence": "partial",
-      "independence_note": "BAER SBS class labels were established by inspecting per-class Tanager NBR (the quantity being predicted). The reference is external but the class coding is partly circular.",
+      "independence_note": "Provisional against an unverifiable reference. (1) BAER SBS class coding was inferred from spatial structure and per-class Tanager NBR (partly the quantity being predicted), not from documentation. (2) The raster's identity is unverified: per-class proportions are near-inverted vs the published USDA BAER Hughes summary. (3) Temporal mismatch: the Hughes swath (2025-01-23) is ~1 day post-ignition with the fire still burning, while BAER SBS is mapped after containment. (4) Code 4 (High, ~141 px) is now kept as its own class rather than merged into code 3, so the kappa changes from the prior 4-class value of 0.527 and must be recomputed on notebook re-execution.",
       "synthetic": false
     },
 
