@@ -26,9 +26,6 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Lint with ruff
-        # Advisory only: 121 pre-existing errors remain from before ruff was introduced.
-        # Flip this back to blocking once the tech-debt cleanup pass lands.
-        continue-on-error: true
         run: ruff check .
 
   test:
