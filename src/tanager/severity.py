@@ -87,7 +87,7 @@ _BARC_THRESHOLDS: Tuple[Tuple[float, int], ...] = (
 # by :func:`tanager.unmixing.normalize_fractions` before severity work).
 _SEVERITY_FEATURES: Tuple[str, ...] = ("char", "pv", "npv", "soil")
 
-# Default RF hyperparameters per spec; deliberately conservative to avoid
+# Default RF hyperparameters; deliberately conservative to avoid
 # overfitting the small CBI ground-truth set typical for a single fire.
 _DEFAULT_RF_N_ESTIMATORS: int = 200
 _DEFAULT_RF_RANDOM_STATE: int = 42

@@ -5,13 +5,14 @@ fuel moisture estimation for the 2025 LA wildfires.**
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-926%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-972%20passing-brightgreen)](tests/)
 
 FireSpec is an open-source Python toolkit built for the [Planet Tanager Open Data
 Competition](#competition). It turns Tanager-1's 426-band hyperspectral imagery (380–2500 nm,
-30 m GSD) into operational wildfire products: MESMA-based burn severity (CBI/BARC), live fuel
-moisture content (LFMC), multi-temporal recovery trajectories, and cross-sensor comparisons
-against EMIT, PRISMA, and Sentinel-2 using the 2025 LA wildfires as the case study.
+30 m GSD) into wildfire products: MESMA-based burn severity (BARC), spectral water-content
+mapping from resolved absorption features, multi-temporal recovery trajectories, and
+cross-sensor comparisons against EMIT, PRISMA, and Sentinel-2 using the 2025 LA wildfires
+as the case study.
 
 ---
 
@@ -21,13 +22,13 @@ against EMIT, PRISMA, and Sentinel-2 using the 2025 LA wildfires as the case stu
 > `figures/`. Run `make notebooks && make figures` (or execute the notebooks directly) to
 > reproduce them locally.
 
-| Model | Metric | Value |
+| Product | Metric | Value |
 | --- | --- | --- |
-| Burn severity (RF classifier vs BAER SBS, 5-fold CV) | ground truth | **BAER Soil Burn Severity** (Hughes fire) |
-| Live fuel moisture (PLSR, 5-fold CV) | R² / RMSE | **0.904** / **15.3%** LFMC |
-| MESMA char. (fire-fuel) fraction R² — EMIT (285 bands, 7.4 nm) | R² vs. native Tanager-1 | **0.991** |
-| MESMA char. (fire-fuel) fraction R² — PRISMA (239 bands, 12 nm) | R² vs. native Tanager-1 | **0.957** |
-| MESMA char. (fire-fuel) fraction R² — Sentinel-2 MSI (10 bands) | R² vs. native Tanager-1 | **0.361** |
+| Burn severity (RF classifier vs BAER SBS) | ground truth | **BAER Soil Burn Severity** (Hughes fire) |
+| DINS cross-check (dNBR vs structure damage) | F1 (any damage) / Spearman rho | **0.774** / **0.358** |
+| MESMA char fraction R² — EMIT (285 bands) | R² vs. native Tanager-1 | **0.991** |
+| MESMA char fraction R² — PRISMA (239 bands) | R² vs. native Tanager-1 | **0.957** |
+| MESMA char fraction R² — Sentinel-2 (10 bands) | R² vs. native Tanager-1 | **0.361** |
 
 Full derivations in [`notebooks/02-burn-severity.ipynb`](notebooks/02-burn-severity.ipynb),
 [`notebooks/03-fuel-moisture.ipynb`](notebooks/03-fuel-moisture.ipynb), and
@@ -38,10 +39,10 @@ Full derivations in [`notebooks/02-burn-severity.ipynb`](notebooks/02-burn-sever
 | ![Burn severity map](figures/severity_map.png) | ![Temporal recovery trajectory](figures/temporal_trajectory.png) |
 | MESMA-derived BARC severity classification over the Palisades burn scar (RF classifier trained on BAER SBS ground truth) | NBR/NDVI/LFMC recovery trajectory across 4 Tanager scenes spanning 2 fire complexes (Palisades and Hughes), Dec 2024 – Apr 2025 |
 
-| Live Fuel Moisture | Recovery by Severity Class |
+| Spectral Water Indices | Recovery by Severity Class |
 | --- | --- |
-| ![LFMC map](figures/lfmc_map.png) | ![NBR/NDVI recovery stratified by BARC severity class](figures/severity_stratified.png) |
-| PLSR-estimated live fuel moisture content (%) from hyperspectral water-absorption indices | NBR/NDVI trajectories split by BARC severity class, Palisades footprint |
+| ![Water-absorption index map](figures/water_indices.png) | ![NBR/NDVI recovery stratified by BARC severity class](figures/severity_stratified.png) |
+| SAI970/SAI1200 and continuum-removal water-absorption depth maps from resolved hyperspectral features | NBR/NDVI trajectories split by BARC severity class, Palisades footprint |
 
 | Sensor Information Loss | Spectral Degradation |
 | --- | --- |
@@ -120,7 +121,7 @@ LFMC estimation, temporal trajectories, sensor comparison).
 | --- | --- |
 | [`01-data-discovery.ipynb`](notebooks/01-data-discovery.ipynb) | STAC catalog traversal and scene inventory — discovering and cataloging the LA wildfire time series |
 | [`02-burn-severity.ipynb`](notebooks/02-burn-severity.ipynb) | MESMA spectral unmixing and BARC burn severity classification, trained against real BAER Soil Burn Severity ground truth (Hughes fire), with RF classifier and NBR-threshold baseline comparison |
-| [`03-fuel-moisture.ipynb`](notebooks/03-fuel-moisture.ipynb) | LFMC estimation via spectral water indices (SAI, continuum removal) and PLSR regression |
+| [`03-fuel-moisture.ipynb`](notebooks/03-fuel-moisture.ipynb) | Spectral water-content mapping via SAI, NDWI, and continuum-removal absorption depths, with Globe-LFMC data-availability assessment |
 | [`04-temporal-recovery.ipynb`](notebooks/04-temporal-recovery.ipynb) | Multi-temporal vegetation recovery trajectories across 4 downloaded Tanager scenes forming 2 disjoint fire-complex pairs (Palisades and Hughes), Dec 2024 – Apr 2025 |
 | [`05-sensor-comparison.ipynb`](notebooks/05-sensor-comparison.ipynb) | Tanager-1 vs EMIT / PRISMA / Sentinel-2 spectral degradation and information-loss analysis |
 

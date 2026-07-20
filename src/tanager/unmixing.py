@@ -98,7 +98,7 @@ _MESMA_RMSE_SENTINEL = 9999.0
 # Tolerance for the sum-to-one check applied during output validation.
 _SUM_TOLERANCE = 0.01
 
-# Default MESMA constraints per spec (Section 4 task 5):
+# Default MESMA constraints:
 #   max_rmse:      models with RMSE > this are rejected.
 #   min_fraction:  fractions below this disqualify the model.
 #   max_fraction:  fractions above this disqualify the model.

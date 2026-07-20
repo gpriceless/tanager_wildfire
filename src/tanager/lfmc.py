@@ -381,7 +381,7 @@ def compute_lfmc_indices(scene: Any) -> xr.Dataset:
             f"[{required_min:.0f}, {required_max:.0f}] nm)"
         )
 
-    # Phase 2 mitigation: clamp before index math.
+    # Clamp before index math to avoid negative-reflectance artifacts.
     refl = refl.clip(0.0, 1.0).astype(np.float64)
 
     # Heavy import here so module import stays cheap.
@@ -815,8 +815,8 @@ def predict_lfmc(
     * **uncertainty_map** — per-pixel uncertainty estimate. When ``model``
       is the dict returned by :func:`train_lfmc_plsr`, the cross-validated
       RMSE (in % LFMC) is used as a uniform global uncertainty floor; this
-      is a coarse approximation, intended as a Tier-1 placeholder until the
-      Phase 4 bootstrap-based prediction interval becomes available. Pixels
+      is a coarse approximation, intended as a placeholder until a
+      bootstrap-based prediction interval becomes available. Pixels
       with NaN input propagate to NaN.
     * **low_lfmc_flag** — boolean DataArray, ``True`` where predicted LFMC
       is below 60 % (the nonlinear / fire-prone regime per Roberts et al.

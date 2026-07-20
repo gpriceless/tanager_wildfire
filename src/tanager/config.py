@@ -147,7 +147,7 @@ FIRE_IGNITION_DATES: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Fire scene catalog
 #
-# Source: research/tanager-data-access-evaluation.md, Section 4.
+# Source: research/tanager-data-access-evaluation.md
 #
 # NOTE: The initial estimate was 12 scenes; verification confirmed 11 in the
 # static STAC catalog as of 2026-04-27.  A possible 12th scene may appear

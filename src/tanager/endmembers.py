@@ -49,8 +49,8 @@ _REFLECTANCE_MIN = 0.0
 _REFLECTANCE_MAX = 1.0
 
 # Default per-band FWHM (nm) for the Tanager-1 sensor when a scene's per-band
-# FWHM is not available. Tanager FWHM varies 5.20-6.81nm across the spectrum
-# (Phase 2 finding); 5.5 is the nominal value documented in the sensor spec.
+# FWHM is not available. Tanager FWHM varies 5.20-6.81 nm across the spectrum;
+# 5.5 is the nominal value documented in the sensor spec.
 _DEFAULT_TARGET_FWHM_NM = 5.5
 
 # Default source FWHM (nm) for ASD lab spectrometers used by USGS / ECOSTRESS /
@@ -408,8 +408,8 @@ def build_fire_library(
             scene is provided, the scene's wavelength coordinate is used.
             Otherwise defaults to ``np.linspace(380, 2500, 426)``.
         target_fwhm: Target sensor FWHM (scalar or per-band array). When the
-            scene Dataset carries a ``coords["fwhm"]`` array (Phase 2 update
-            to ``load_ortho_scene``), the caller should pass that for accuracy.
+            scene Dataset carries a ``coords["fwhm"]`` array (from
+            ``load_ortho_scene``), the caller should pass that for accuracy.
         usgs_dir: Directory of USGS splib07a ASCII files, or ``None`` to skip.
         ecostress_sqlite: Path to a pre-built ECOSTRESS SPy SQLite, or ``None``.
         frames_dir: Directory of FRAMES SoCal ASCII files, or ``None``.
@@ -809,8 +809,8 @@ def resample_library(
     """Resample an endmember library to a target wavelength grid via SPy.
 
     Uses :class:`spectral.BandResampler` for Gaussian-convolution-based
-    spectral resampling. Per the Phase 2 finding that Tanager's per-band FWHM
-    varies 5.20-6.81 nm across the spectrum, this function accepts either a
+    spectral resampling. Tanager's per-band FWHM varies 5.20-6.81 nm across
+    the spectrum, so this function accepts either a
     scalar or a per-band array for ``fwhm``. When a scene Dataset's
     ``coords["fwhm"]`` is available, prefer passing it as the per-band array.
 

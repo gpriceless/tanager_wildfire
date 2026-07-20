@@ -1607,8 +1607,8 @@ def _rank_average_ties(values: np.ndarray) -> np.ndarray:
 # used in endmembers.py for resample_library() to avoid drift.
 _REFLECTANCE_MIN: float = 0.0
 _REFLECTANCE_MAX: float = 1.0
-# Mean Tanager-1 per-band FWHM. Phase 2 spectral characterisation reported
-# per-band values in 5.20-6.81 nm; 5.5 nm is the operating mean and matches
+# Mean Tanager-1 per-band FWHM. Spectral characterisation shows per-band
+# values in 5.20-6.81 nm; 5.5 nm is the operating mean and matches
 # endmembers._DEFAULT_TARGET_FWHM_NM.
 _DEFAULT_TANAGER_FWHM_NM: float = 5.5
 
@@ -1643,7 +1643,7 @@ def simulate_sensor(
             ``sensor_name`` attribute (e.g. ``"EMIT"``, ``"PRISMA"``,
             ``"Sentinel-2"``).
         source_fwhm: Source (Tanager) FWHM in nanometres. Defaults to
-            ``5.5`` nm — the Phase 2 mean across Tanager's 5.20-6.81 nm
+            ``5.5`` nm — the mean across Tanager's 5.20-6.81 nm
             per-band range. Pass the per-band ``coords["fwhm"]`` array when
             available for higher accuracy.
 

@@ -792,7 +792,7 @@ with `compare_sensors`.
 | `target_centers` | `np.ndarray \| Sequence[float]` | Target sensor band centres (nm), e.g. `EMIT_SENSOR` wavelengths. |
 | `target_fwhm` | `float \| np.ndarray \| Sequence[float]` | Target sensor FWHM (nm), scalar or per-band. |
 | `sensor_name` | `str` | Label written to the output's `sensor_name` attribute (e.g. `"EMIT"`). |
-| `source_fwhm` | `float \| np.ndarray \| Sequence[float]` | Source (Tanager) FWHM (nm), default 5.5 (Phase 2 mean across the 5.20-6.81 nm per-band range). |
+| `source_fwhm` | `float \| np.ndarray \| Sequence[float]` | Source (Tanager) FWHM (nm), default 5.5 (mean across the 5.20-6.81 nm per-band range). |
 
 Returns the same container type as `scene`, with `wavelength` replaced by
 `target_centers` and reflectance clipped to `[0, 1]`.
