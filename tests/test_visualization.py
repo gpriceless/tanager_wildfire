@@ -77,15 +77,20 @@ def simple_fig():
 # ---------------------------------------------------------------------------
 
 
-EXPECTED_PRODUCT_KEYS = frozenset(
-    {"nbr", "ndvi", "ndwi", "dnbr", "cbi", "severity", "char", "pv", "npv", "soil", "lfmc"}
-)
+EXPECTED_PRODUCT_KEYS = frozenset({
+    "nbr", "ndvi", "ndwi", "dnbr", "cbi", "severity", "char", "pv", "npv", "soil", "lfmc",
+    "sai970", "sai1200", "sai1660",
+    "ndwi_1240", "ndwi_1640", "ndwi_2130",
+    "wi",
+    "cr_depth_970", "cr_depth_1200", "cr_depth_1700", "cr_depth_2100",
+    "delta_nbr", "delta_ndvi",
+})
 
 
 class TestProductStylesAllKeys:
-    """PRODUCT_STYLES must contain exactly the 11 product keys."""
+    """PRODUCT_STYLES must contain exactly the expected product keys."""
 
-    def test_all_11_keys_present(self):
+    def test_all_keys_present(self):
         assert set(PRODUCT_STYLES.keys()) == EXPECTED_PRODUCT_KEYS
 
     def test_has_no_extra_keys(self):

@@ -40,15 +40,22 @@ class TestProductStyleDataclass:
 # ---------------------------------------------------------------------------
 
 
-EXPECTED_PRODUCTS = {"nbr", "ndvi", "ndwi", "dnbr", "cbi", "severity", "char", "pv", "npv", "soil", "lfmc"}
+EXPECTED_PRODUCTS = {
+    "nbr", "ndvi", "ndwi", "dnbr", "cbi", "severity", "char", "pv", "npv", "soil", "lfmc",
+    "sai970", "sai1200", "sai1660",
+    "ndwi_1240", "ndwi_1640", "ndwi_2130",
+    "wi",
+    "cr_depth_970", "cr_depth_1200", "cr_depth_1700", "cr_depth_2100",
+    "delta_nbr", "delta_ndvi",
+}
 
 
 class TestProductStylesKeys:
     def test_contains_all_11_products(self):
         assert set(PRODUCT_STYLES.keys()) == EXPECTED_PRODUCTS
 
-    def test_has_exactly_11_entries(self):
-        assert len(PRODUCT_STYLES) == 11
+    def test_has_exactly_24_entries(self):
+        assert len(PRODUCT_STYLES) == 24
 
     @pytest.mark.parametrize("product", sorted(EXPECTED_PRODUCTS))
     def test_each_value_is_product_style_instance(self, product):
