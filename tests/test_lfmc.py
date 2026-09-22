@@ -17,6 +17,7 @@ relationships exercise:
 
 from __future__ import annotations
 
+import logging
 from typing import Tuple
 
 import numpy as np
@@ -565,6 +566,107 @@ class TestLoadGlobeLFMC:
         assert len(gdf) == 2
         assert gdf["lfmc_percent"].min() >= 50.0
         assert gdf["lfmc_percent"].max() <= 100.0
+
+    def _write_implausible_csv(self, tmp_path) -> str:
+        """Published headers with the defect classes the real release contains.
+
+        Row 0 is clean. Row 1 has an elevation above Everest (the real file
+        carries 26,872.7 m at one site). Row 2 has an LFMC far above the
+        dataset's 99.9th percentile (the real file reaches 599,999 %). Row 3
+        has a negative LFMC, impossible by definition. Slope mixes numbers with
+        the censored string ``"< 30"`` exactly as the source does.
+        """
+        import pandas as pd
+
+        df = pd.DataFrame(
+            {
+                "Latitude (WGS84, EPSG:4326)": [34.05, 40.84, 35.60, 33.90],
+                "Longitude (WGS84, EPSG:4326)": [-118.25, -106.98, -118.45, -117.60],
+                "Sampling date (YYYYMMDD)": [
+                    "2020-04-01",
+                    "2020-04-02",
+                    "2020-04-03",
+                    "2020-04-04",
+                ],
+                "LFMC value (%)": [120.0, 95.0, 599999.0, -5.0],
+                "Elevation (m.a.s.l)": [300.0, 26872.692, 900.0, 250.0],
+                "Slope (%)": ["5", "< 30", "12", "0"],
+                "Site name": ["Clean", "Hahns Peak", "Black Star", "Neg"],
+            }
+        )
+        path = tmp_path / "globe_lfmc_implausible.csv"
+        df.to_csv(path, index=False)
+        return str(path)
+
+    def test_implausible_rows_are_flagged_not_dropped_or_clipped(self, tmp_path, caplog):
+        """Default behaviour keeps every row, flags it, and logs the counts."""
+        pytest.importorskip("geopandas")
+        path = self._write_implausible_csv(tmp_path)
+
+        with caplog.at_level(logging.WARNING, logger="tanager.lfmc"):
+            gdf = lfmc.load_globe_lfmc(path)
+
+        assert len(gdf) == 4
+        # Values are untouched: no clipping.
+        assert gdf["elevation_m"].max() == pytest.approx(26872.692)
+        assert gdf["lfmc_percent"].max() == pytest.approx(599999.0)
+        assert gdf["lfmc_percent"].min() == pytest.approx(-5.0)
+
+        by_site = gdf.set_index("site_name")
+        assert by_site.loc["Clean", "range_flags"] == ""
+        assert not by_site.loc["Clean", "implausible"]
+        assert by_site.loc["Hahns Peak", "implausible"]
+        assert by_site.loc["Hahns Peak", "range_flags"] == "elevation_m_above_8849"
+        # A high LFMC is outside the envelope but has no citable ceiling, so
+        # it is never marked impossible.
+        assert not by_site.loc["Black Star", "implausible"]
+        assert by_site.loc["Black Star", "outside_expected_envelope"]
+        assert by_site.loc["Black Star", "range_flags"] == "lfmc_percent_above_expected_494"
+        assert by_site.loc["Neg", "implausible"]
+        assert by_site.loc["Neg", "range_flags"] == "lfmc_percent_below_0"
+
+        messages = "\n".join(r.getMessage() for r in caplog.records)
+        assert "1 rows violate hard bound elevation_m_above_8849" in messages
+        assert "1 rows violate hard bound lfmc_percent_below_0" in messages
+        assert "1 rows have lfmc_percent above the expected envelope" in messages
+
+    def test_slope_strings_become_nan_and_source_text_is_kept(self, tmp_path, caplog):
+        pytest.importorskip("geopandas")
+        path = self._write_implausible_csv(tmp_path)
+
+        with caplog.at_level(logging.WARNING, logger="tanager.lfmc"):
+            gdf = lfmc.load_globe_lfmc(path)
+
+        assert gdf["slope_percent"].dtype == np.float64
+        # max() must not raise on a mixed column anymore.
+        assert gdf["slope_percent"].max() == pytest.approx(12.0)
+        by_site = gdf.set_index("site_name")
+        assert np.isnan(by_site.loc["Hahns Peak", "slope_percent"])
+        assert by_site.loc["Hahns Peak", "slope_source"] == "< 30"
+        assert "1 non-numeric slope values" in caplog.text
+
+    def test_drop_implausible_removes_only_hard_bound_violators(self, tmp_path, caplog):
+        pytest.importorskip("geopandas")
+        path = self._write_implausible_csv(tmp_path)
+
+        with caplog.at_level(logging.WARNING, logger="tanager.lfmc"):
+            gdf = lfmc.load_globe_lfmc(path, drop_implausible=True)
+
+        # Everest-plus elevation and negative LFMC go; the 599,999 % row
+        # stays because it only breaches the empirical envelope.
+        assert sorted(gdf["site_name"]) == ["Black Star", "Clean"]
+        assert not gdf["implausible"].any()
+        assert "dropped 2 implausible rows" in caplog.text
+
+    def test_lfmc_range_logs_dropped_count(self, tmp_path, caplog):
+        pytest.importorskip("geopandas")
+        path = self._write_implausible_csv(tmp_path)
+
+        with caplog.at_level(logging.WARNING, logger="tanager.lfmc"):
+            gdf = lfmc.load_globe_lfmc(path, lfmc_range=(5.0, 400.0))
+
+        assert sorted(gdf["site_name"]) == ["Clean", "Hahns Peak"]
+        assert "dropped 2 rows outside caller lfmc_range=(5, 400)" in caplog.text
 
     def test_missing_file_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError):

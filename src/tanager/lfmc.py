@@ -480,7 +480,33 @@ _GLOBE_LFMC_COLUMN_ALIASES: Mapping[str, Tuple[str, ...]] = {
         "species functional type",
         "igbp land cover",
     ),
+    "elevation_m": ("elevation_m", "elevation", "elev", "elevation (m.a.s.l)"),
+    "slope_percent": ("slope_percent", "slope", "slope_pct", "slope (%)"),
 }
+
+
+# Plausibility bounds applied by load_globe_lfmc. Every bound cites an external
+# source; none is a value chosen for convenience. Rows violating a *hard* bound
+# are physically impossible; rows outside the *expected* envelope are unusual
+# but not impossible and are never dropped by the loader.
+#
+#   elevation_m   hard [-450, 8849] m. Upper: Everest summit 8848.86 m (Nepal-
+#                 China joint survey, 2020). Lower: Dead Sea shore, -430.5 m in
+#                 2015 and falling ~1 m/yr; -450 allows that trend through the
+#                 2030s.
+#   slope_percent hard [0, inf) — tan(angle) x 100 is non-negative by
+#                 definition and unbounded above.
+#   lfmc_percent  hard [0, inf) — (fresh - dry) / dry >= 0 by definition. No
+#                 citable physical ceiling exists, so the loader never marks a
+#                 high LFMC impossible. expected_max = 494 is the 99.9th
+#                 percentile of Globe-LFMC 2.0 itself (n = 293,796; Yebra et
+#                 al. 2024), recomputed from the local copy on 2026-09-22.
+_GLOBE_LFMC_HARD_BOUNDS: Mapping[str, Tuple[float, float]] = {
+    "elevation_m": (-450.0, 8849.0),
+    "slope_percent": (0.0, np.inf),
+    "lfmc_percent": (0.0, np.inf),
+}
+_GLOBE_LFMC_EXPECTED_MAX_PERCENT: float = 494.0
 
 
 def _normalize_globe_lfmc_columns(columns: Iterable[str]) -> dict[str, str]:
@@ -503,6 +529,7 @@ def load_globe_lfmc(
     tanager_scene_dates: Optional[Sequence[Any]] = None,
     colocation_window_days: int = 30,
     lfmc_range: Optional[Tuple[float, float]] = None,
+    drop_implausible: bool = False,
 ) -> Any:
     """Load Globe-LFMC 2.0 observations as a filtered GeoDataFrame.
 
@@ -512,6 +539,29 @@ def load_globe_lfmc(
     against ``_GLOBE_LFMC_COLUMN_ALIASES``, applies optional spatial /
     vegetation / LFMC-range filters, and returns a GeoPandas GeoDataFrame ready
     for :func:`train_lfmc_plsr` ground-truth assembly.
+
+    **Plausibility rule.** The published file contains values that cannot be
+    real (an elevation of 26,872.7 m at 267 rows of one site; LFMC values up
+    to 599,999 %) and a ``Slope (%)`` column that mixes numbers with censored
+    strings such as ``"< 30"``. The loader handles these in the open and never
+    clips a value:
+
+    * ``elevation_m`` and ``slope_percent`` are coerced to float. Non-numeric
+      slope strings become NaN in ``slope_percent``; the original text is kept
+      in ``slope_source`` and the count is logged.
+    * Every row is checked against the cited bounds in
+      ``_GLOBE_LFMC_HARD_BOUNDS`` (elevation within Dead Sea .. Everest, slope
+      and LFMC non-negative). Violations set ``implausible=True`` and name the
+      rule in ``range_flags``.
+    * LFMC above ``_GLOBE_LFMC_EXPECTED_MAX_PERCENT`` (494 %, the dataset's
+      own 99.9th percentile) sets ``outside_expected_envelope=True``. LFMC
+      has no citable physical ceiling, so a high value is unusual, never
+      impossible, and is never dropped by the loader on its own.
+    * Nothing is dropped by default; every flag count is logged at WARNING.
+      ``drop_implausible=True`` removes the hard-bound violators with a logged
+      count. Rows outside the expected envelope are only removed when the
+      caller asks for it through ``lfmc_range``, whose dropped count is also
+      logged.
 
     Args:
         data_path: Path to the Globe-LFMC file (CSV or xlsx). For xlsx files,
@@ -529,14 +579,21 @@ def load_globe_lfmc(
             ``colocation_window_days`` of *any* scene date.
         colocation_window_days: Half-window for the colocation flag. Default 30.
         lfmc_range: Optional ``(min, max)`` LFMC percent filter. Observations
-            outside this range are dropped. Useful for removing Globe-LFMC 2.0
-            outliers (the dataset contains a handful of values >10,000%).
+            outside this range are dropped and the count is logged. This is
+            the caller's explicit envelope; the dataset contains three values
+            above 10,000 % and 28 at or above 1,000 %.
+        drop_implausible: When True, rows with ``implausible=True`` (a cited
+            hard bound violated) are removed and the count is logged. Default
+            False: rows are kept and flagged.
 
     Returns:
         ``geopandas.GeoDataFrame`` with EPSG:4326 geometry and at least the
         canonical columns ``longitude``, ``latitude``, ``date``,
-        ``lfmc_percent``, plus ``species``, ``site_name``,
-        ``vegetation_type``, and ``tanager_colocated`` when available in the
+        ``lfmc_percent``, the plausibility columns ``implausible`` (bool),
+        ``outside_expected_envelope`` (bool) and ``range_flags`` (``;``-joined
+        rule names, empty when clean), plus ``species``, ``site_name``,
+        ``vegetation_type``, ``elevation_m``, ``slope_percent``,
+        ``slope_source`` and ``tanager_colocated`` when available in the
         source.
 
     Raises:
@@ -580,9 +637,91 @@ def load_globe_lfmc(
     df["longitude"] = df["longitude"].astype(float)
     df["lfmc_percent"] = df["lfmc_percent"].astype(float)
 
+    # Coerce the terrain columns. Globe-LFMC 2.0 ships ``Slope (%)`` as mixed
+    # numbers and censored strings ("< 30"); the text survives in
+    # ``slope_source`` so the censoring is not lost, and the numeric column
+    # gets NaN there.
+    if "elevation_m" in df.columns:
+        df["elevation_m"] = pd.to_numeric(df["elevation_m"], errors="coerce")
+    if "slope_percent" in df.columns:
+        raw_slope = df["slope_percent"]
+        df["slope_source"] = raw_slope
+        df["slope_percent"] = pd.to_numeric(raw_slope, errors="coerce")
+        censored = df["slope_percent"].isna() & raw_slope.notna()
+        n_censored = int(censored.sum())
+        if n_censored:
+            logger.warning(
+                "load_globe_lfmc: %d non-numeric slope values (e.g. %s) set to "
+                "NaN in slope_percent; original text kept in slope_source",
+                n_censored,
+                sorted(raw_slope[censored].astype(str).unique().tolist())[:5],
+            )
+
+    # Plausibility flags against cited bounds. Rows are flagged, never
+    # altered, and only dropped when the caller asks (see docstring).
+    triggered: list[Tuple[str, Any]] = []  # (rule name, boolean mask)
+    implausible = pd.Series(False, index=df.index)
+    for col, (lo_b, hi_b) in _GLOBE_LFMC_HARD_BOUNDS.items():
+        if col not in df.columns:
+            continue
+        values = df[col]
+        for name, mask, extreme in (
+            (f"{col}_below_{lo_b:g}", values < lo_b, values.min),
+            (f"{col}_above_{hi_b:g}", values > hi_b, values.max),
+        ):
+            n = int(mask.sum())
+            if n:
+                logger.warning(
+                    "load_globe_lfmc: %d rows violate hard bound %s (extreme=%g); "
+                    "flagged implausible, not clipped",
+                    n,
+                    name,
+                    float(extreme()),
+                )
+                triggered.append((name, mask))
+                implausible |= mask
+    envelope = df["lfmc_percent"] > _GLOBE_LFMC_EXPECTED_MAX_PERCENT
+    n_env = int(envelope.sum())
+    if n_env:
+        logger.warning(
+            "load_globe_lfmc: %d rows have lfmc_percent above the expected "
+            "envelope (%g%%, 99.9th percentile of Globe-LFMC 2.0; max=%g%%); "
+            "flagged outside_expected_envelope, kept",
+            n_env,
+            _GLOBE_LFMC_EXPECTED_MAX_PERCENT,
+            float(df.loc[envelope, "lfmc_percent"].max()),
+        )
+        triggered.append(
+            (f"lfmc_percent_above_expected_{_GLOBE_LFMC_EXPECTED_MAX_PERCENT:g}", envelope)
+        )
+    range_flags = pd.Series("", index=df.index, dtype=object)
+    for name, mask in triggered:
+        sep = np.where(range_flags[mask] == "", "", ";")
+        range_flags[mask] = range_flags[mask] + sep + name
+    df["implausible"] = implausible.astype(bool)
+    df["outside_expected_envelope"] = envelope.astype(bool)
+    df["range_flags"] = range_flags
+
+    if drop_implausible:
+        n_drop = int(df["implausible"].sum())
+        df = df[~df["implausible"]]
+        logger.warning(
+            "load_globe_lfmc: dropped %d implausible rows (drop_implausible=True)",
+            n_drop,
+        )
+
     if lfmc_range is not None:
         lo, hi = lfmc_range
-        df = df[(df["lfmc_percent"] >= lo) & (df["lfmc_percent"] <= hi)]
+        in_range = (df["lfmc_percent"] >= lo) & (df["lfmc_percent"] <= hi)
+        n_out = int((~in_range).sum())
+        df = df[in_range]
+        logger.log(
+            logging.WARNING if n_out else logging.INFO,
+            "load_globe_lfmc: dropped %d rows outside caller lfmc_range=(%g, %g)",
+            n_out,
+            lo,
+            hi,
+        )
 
     if region_bbox is not None:
         west, south, east, north = region_bbox
