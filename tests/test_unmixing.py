@@ -10,6 +10,8 @@ import xarray as xr
 
 from tanager import unmixing
 from tanager.unmixing import (
+    DEFAULT_CONSTRAINTS,
+    SHADE_NORMALIZED_CONSTRAINTS,
     normalize_fractions,
     plot_fraction_maps,
     plot_rgb_composite,
@@ -295,58 +297,70 @@ class TestNormalizeFractions:
         assert "shade" in out.data_vars
         np.testing.assert_array_equal(out["shade"].values, ds["shade"].values)
 
-    def test_clamps_out_of_bounds_fractions_after_shade_normalization(self):
-        # Shade rescale (divide by 1 - shade = 0.4) pushes char to 1.125 and
-        # pv/soil slightly negative. The output must clamp to [0, 1] and
-        # re-normalize so the canonical fractions still sum to 1.0.
+    def test_out_of_bounds_fractions_are_reported_not_clipped(self, caplog):
+        # A raw model that used the tolerant constraints (pv=-0.02, soil=-0.01)
+        # with the raw fractions summing to 1 - shade = 0.6. Rescaling by 1/0.6
+        # gives pv=-0.033 and soil=-0.017. The function must pass those values
+        # through and count the pixel, because clipping would hide that the
+        # selected model was non-physical.
         ds = xr.Dataset(
             {
                 "char": (["y", "x"], np.array([[0.45]], dtype=np.float32)),
                 "pv": (["y", "x"], np.array([[-0.02]], dtype=np.float32)),
                 "npv": (["y", "x"], np.array([[0.18]], dtype=np.float32)),
                 "soil": (["y", "x"], np.array([[-0.01]], dtype=np.float32)),
-                "shade": (["y", "x"], np.array([[0.6]], dtype=np.float32)),
+                "shade": (["y", "x"], np.array([[0.4]], dtype=np.float32)),
                 "rmse": (["y", "x"], np.array([[0.01]], dtype=np.float32)),
             },
             coords={"y": [0], "x": [0]},
         )
 
-        out = normalize_fractions(ds, remove_shade=True)
+        with caplog.at_level("WARNING"):
+            out = normalize_fractions(ds, remove_shade=True)
 
-        for v in ("char", "pv", "npv", "soil"):
-            vals = out[v].values
-            assert np.all(vals >= 0.0), f"{v} has values below 0: {vals}"
-            assert np.all(vals <= 1.0), f"{v} has values above 1: {vals}"
+        np.testing.assert_allclose(float(out["char"].values[0, 0]), 0.45 / 0.6, rtol=1e-5)
+        np.testing.assert_allclose(float(out["pv"].values[0, 0]), -0.02 / 0.6, rtol=1e-5)
+        np.testing.assert_allclose(float(out["soil"].values[0, 0]), -0.01 / 0.6, rtol=1e-5)
+        assert out.attrs["n_pixels_outside_unit_interval"] == 1
+        assert any("outside [0, 1]" in rec.getMessage() for rec in caplog.records)
 
+        # Rescaling preserves the sum-to-one identity even when values are
+        # outside [0, 1]; nothing was re-normalized after the fact.
         total = sum(out[v].values for v in ("char", "pv", "npv", "soil"))
         np.testing.assert_allclose(total, 1.0, atol=1e-4)
 
-    def test_extreme_overshoot_is_clamped(self):
-        # Covers the upper end of the bug report (5-12% of pixels at min=-0.25,
-        # max=1.25 in real Tanager scenes): a single fraction far above 1.0
-        # combined with a strongly negative one. Clamp + re-normalize must
-        # still yield values in [0, 1] that sum to 1.
+    def test_physical_raw_fractions_stay_in_unit_interval_without_clipping(self):
+        # Under SHADE_NORMALIZED_CONSTRAINTS every raw fraction lies in
+        # [0, 1 - shade], so dividing by (1 - shade) lands in [0, 1] with no
+        # clamp. Build raw fractions that satisfy exactly that.
+        rng = np.random.default_rng(0)
+        shade = rng.uniform(0.0, 0.8, size=(4, 4)).astype(np.float32)
+        raw = rng.dirichlet(np.ones(4), size=(4, 4)).astype(np.float32)
+        raw = raw * (1.0 - shade)[..., None]
+        names = ("char", "pv", "npv", "soil")
         ds = xr.Dataset(
-            {
-                "char": (["y", "x"], np.array([[0.50]], dtype=np.float32)),
-                "pv": (["y", "x"], np.array([[-0.10]], dtype=np.float32)),
-                "npv": (["y", "x"], np.array([[0.10]], dtype=np.float32)),
-                "soil": (["y", "x"], np.array([[0.00]], dtype=np.float32)),
-                "shade": (["y", "x"], np.array([[0.5]], dtype=np.float32)),
-                "rmse": (["y", "x"], np.array([[0.01]], dtype=np.float32)),
+            {name: (["y", "x"], raw[..., i]) for i, name in enumerate(names)}
+            | {
+                "shade": (["y", "x"], shade),
+                "rmse": (["y", "x"], np.zeros((4, 4), dtype=np.float32)),
             },
-            coords={"y": [0], "x": [0]},
+            coords={"y": np.arange(4), "x": np.arange(4)},
         )
 
         out = normalize_fractions(ds, remove_shade=True)
 
-        for v in ("char", "pv", "npv", "soil"):
+        for v in names:
             vals = out[v].values
-            assert np.all((vals >= 0.0) & (vals <= 1.0)), (
-                f"{v} outside [0, 1]: {vals}"
-            )
-        total = sum(out[v].values for v in ("char", "pv", "npv", "soil"))
+            assert np.all((vals >= 0.0) & (vals <= 1.0)), f"{v} outside [0, 1]: {vals}"
+        assert out.attrs["n_pixels_outside_unit_interval"] == 0
+        total = sum(out[v].values for v in names)
         np.testing.assert_allclose(total, 1.0, atol=1e-4)
+
+    def test_shade_normalized_constraints_are_physical(self):
+        assert SHADE_NORMALIZED_CONSTRAINTS["min_fraction"] == 0.0
+        assert SHADE_NORMALIZED_CONSTRAINTS["max_fraction"] == 1.0
+        for key in ("min_shade", "max_shade", "max_rmse"):
+            assert SHADE_NORMALIZED_CONSTRAINTS[key] == DEFAULT_CONSTRAINTS[key]
 
 
 # ---------------------------------------------------------------------------

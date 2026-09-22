@@ -20,7 +20,8 @@ Public API (lazy-imported via ``tanager`` package):
 
 * :func:`select_bands_uszu` — Uniform Spectral Zone Unmixing band selection
 * :func:`run_mesma` — main unmixing entry point
-* :func:`normalize_fractions` — shade removal + rescale to sum=1.0
+* :func:`normalize_fractions` — shade removal + rescale to sum=1.0 (never clips;
+  pair with :data:`SHADE_NORMALIZED_CONSTRAINTS` for an in-range product)
 * :func:`plot_fraction_maps` — per-class fraction map figure
 * :func:`plot_rgb_composite` — false-colour RGB from fraction maps
 
@@ -98,6 +99,11 @@ _MESMA_RMSE_SENTINEL = 9999.0
 # Tolerance for the sum-to-one check applied during output validation.
 _SUM_TOLERANCE = 0.01
 
+# float32 rounding allowance when testing whether a shade-normalized fraction
+# lies in [0, 1]. Deliberately tight: anything beyond rounding is a real
+# excursion and must be reported, not absorbed.
+_UNIT_INTERVAL_TOLERANCE = 1e-4
+
 # Default MESMA constraints:
 #   max_rmse:      models with RMSE > this are rejected.
 #   min_fraction:  fractions below this disqualify the model.
@@ -110,6 +116,25 @@ DEFAULT_CONSTRAINTS: Mapping[str, float] = {
     "min_shade": 0.0,
     "max_shade": 0.8,
     "max_rmse": 0.025,
+}
+
+# Constraints to use when the fractions will be shade-normalized afterwards.
+#
+# The Roberts et al. (1998) tolerance of [-0.05, 1.05] is a bound on the *raw*
+# model fractions. Shade normalization divides each fraction by (1 - shade),
+# and with max_shade = 0.8 that multiplies the tolerance by up to 5x, so a raw
+# fraction of -0.05 becomes -0.25 and 1.05 becomes 1.25 in the normalized
+# product. Clamping the normalized product back into [0, 1] hides that the
+# selected model was non-physical. Instead, require the raw fractions to be
+# physical: with min_fraction = 0 and the sum-to-one constraint, every raw
+# fraction satisfies 0 <= f <= 1 - shade, so f / (1 - shade) lies in [0, 1] by
+# construction. The MESMA search then picks the best *feasible* model for each
+# pixel, and a pixel with no physical model stays NaN (unmodeled) rather than
+# being clipped.
+SHADE_NORMALIZED_CONSTRAINTS: Mapping[str, float] = {
+    **DEFAULT_CONSTRAINTS,
+    "min_fraction": 0.0,
+    "max_fraction": 1.0,
 }
 
 
@@ -756,10 +781,18 @@ def normalize_fractions(
 
     Returns:
         New Dataset. If ``remove_shade`` was True, the shade variable is
-        absent and the remaining canonical fractions are clamped to ``[0, 1]``
-        and re-normalized to sum to ~1.0 per pixel. Pixels with shade==1.0
-        (fully shaded) or whose post-clamp canonical fractions all collapse
-        to zero become NaN.
+        absent and every remaining fraction is divided by the sum of the
+        canonical non-shade fractions (identically ``1 - shade`` under the
+        sum-to-one constraint) so they sum to 1.0 per pixel. Pixels with
+        shade==1.0 (fully shaded) or with no non-shade signal become NaN.
+
+        Values are never clipped. If the raw fractions were produced under the
+        tolerant :data:`DEFAULT_CONSTRAINTS` (``min_fraction=-0.05``), the
+        rescale amplifies that tolerance by up to ``1/(1-max_shade)`` and the
+        result can leave ``[0, 1]``. The number of such pixels is recorded in
+        ``attrs["n_pixels_outside_unit_interval"]`` and logged as a warning.
+        To obtain a product that is in ``[0, 1]`` by construction, run the
+        unmixing with :data:`SHADE_NORMALIZED_CONSTRAINTS` instead.
 
     Raises:
         ValueError: If the input is missing the canonical fraction variables.
@@ -772,32 +805,50 @@ def normalize_fractions(
     other_vars = [v for v in _CANONICAL_FRACTIONS if v != "shade" and v in fractions]
     extras = [v for v in fractions.data_vars if v not in _CANONICAL_FRACTIONS and v != "rmse"]
 
-    denom = (1.0 - shade).astype(np.float32)
-    safe_denom = xr.where(np.abs(denom) > 1e-6, denom, np.nan)
-
-    # The MESMA solver uses tolerant constraints (min_fraction=-0.05,
-    # max_fraction=1.05); shade rescaling amplifies these residuals further,
-    # so post-rescale fractions can fall outside [0, 1]. Clamp each canonical
-    # fraction to [0, 1] then re-normalize so they still sum to 1.0.
-    clamped_canonical = {
-        var: (fractions[var] / safe_denom).astype(np.float32).clip(0.0, 1.0)
-        for var in other_vars
-    }
+    # Under MESMA's sum-to-one constraint the non-shade fractions sum to
+    # exactly 1 - shade, so the two are interchangeable as the denominator.
+    # Divide by the sum rather than by (1 - shade): the sum is computed from
+    # the same float32 values being divided, so a pure pixel yields exactly
+    # 1.0 and a mixed pixel strictly less. Dividing by (1 - shade), where the
+    # shade channel was rounded to float32 separately, leaves single-ULP
+    # excursions above 1.0 that a strict [0, 1] range check reports.
+    # Fully shaded pixels (1 - shade ~ 0) and pixels whose non-shade
+    # fractions sum to ~0 become NaN.
+    illuminated = np.abs((1.0 - shade).astype(np.float32)) > 1e-6
+    total = sum(fractions[v].astype(np.float32) for v in other_vars) if other_vars else None
+    if total is not None:
+        safe_denom = xr.where(illuminated & (np.abs(total) > 1e-6), total, np.nan)
+    else:
+        denom = (1.0 - shade).astype(np.float32)
+        safe_denom = xr.where(illuminated, denom, np.nan)
 
     out = xr.Dataset()
-    if clamped_canonical:
-        total = sum(clamped_canonical.values())
-        safe_total = xr.where(total > 1e-6, total, np.nan)
-        for var, val in clamped_canonical.items():
-            out[var] = (val / safe_total).astype(np.float32)
-
-    for var in extras:
+    for var in (*other_vars, *extras):
         out[var] = (fractions[var] / safe_denom).astype(np.float32)
 
     if "rmse" in fractions:
         out["rmse"] = fractions["rmse"]
     out.attrs.update(fractions.attrs)
     out.attrs["shade_normalized"] = True
+
+    # Report, do not clip. A normalized fraction outside [0, 1] means the raw
+    # model used the [-0.05, 1.05] tolerance; the caller should tighten the
+    # unmixing constraints, not the output.
+    n_outside = 0
+    if other_vars:
+        stack = np.stack([np.asarray(out[v].values, dtype=np.float32) for v in other_vars])
+        tol = _UNIT_INTERVAL_TOLERANCE
+        outside = ((stack < -tol) | (stack > 1.0 + tol)).any(axis=0)
+        n_outside = int(outside.sum())
+    out.attrs["n_pixels_outside_unit_interval"] = n_outside
+    if n_outside:
+        logger.warning(
+            "normalize_fractions: %d pixels have a shade-normalized fraction outside "
+            "[0, 1]; the raw model used the tolerant fraction constraints. Values are "
+            "left as-is. Run the unmixing with SHADE_NORMALIZED_CONSTRAINTS "
+            "(min_fraction=0, max_fraction=1) for an in-range product.",
+            n_outside,
+        )
     return out
 
 
@@ -902,6 +953,7 @@ def plot_rgb_composite(
 
 __all__ = [
     "DEFAULT_CONSTRAINTS",
+    "SHADE_NORMALIZED_CONSTRAINTS",
     "select_bands_uszu",
     "run_mesma",
     "normalize_fractions",

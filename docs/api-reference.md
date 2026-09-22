@@ -538,13 +538,29 @@ Returns `(scene_subset, selected_indices)`.
 
 ### `normalize_fractions(fractions, remove_shade=True) -> xr.Dataset`
 
-Remove the shade fraction and rescale remaining fractions to sum to 1.0
-(Roberts et al. 2018 standard practice).
+Remove the shade fraction and divide the remaining fractions by their sum
+(identically `1 - shade` under MESMA's sum-to-one constraint, and exact at the
+bounds in float32) so they sum to 1.0 (Roberts et al. 2018 standard practice).
+Values are never clipped: if the raw model used the tolerant `DEFAULT_CONSTRAINTS`
+(`min_fraction=-0.05`), the rescale amplifies that tolerance by up to
+`1/(1 - max_shade)` = 5× and the result can leave `[0, 1]`. The count of such
+pixels is stored in `attrs["n_pixels_outside_unit_interval"]` and logged as a
+warning.
 
 | Parameter | Type | Description |
 |---|---|---|
 | `fractions` | `xr.Dataset` | Output of `run_mesma`. |
 | `remove_shade` | `bool` | Default `True`; `False` returns an unmodified copy. |
+
+### `SHADE_NORMALIZED_CONSTRAINTS`
+
+Constraint mapping for `run_mesma(..., constraints=SHADE_NORMALIZED_CONSTRAINTS)`
+when the output will be passed to `normalize_fractions`. Identical to
+`DEFAULT_CONSTRAINTS` except `min_fraction=0.0` and `max_fraction=1.0`. With
+non-negative raw fractions that sum to one, every fraction satisfies
+`0 <= f <= 1 - shade`, so the shade-normalized product lies in `[0, 1]` by
+construction. The MESMA search selects the best feasible model per pixel;
+pixels with no physical model remain NaN rather than being clipped.
 
 ### `plot_fraction_maps(fractions, figsize=None, cmap="viridis") -> Figure`
 

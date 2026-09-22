@@ -48,8 +48,8 @@ Tanager version: 0.1.0
       - `outputs/20241215_CR_depths_1700nm.tif`
       - `outputs/20241215_CR_depths_2100nm.tif`
 
-  - **[OK] `mesma_image_endmembers`** — 9.7s
-      engine=mesma regions={'char': 7871, 'pv': 101770, 'npv': 13763, 'soil': 2236}; frac_char: n_finite=94795 mean=+0.098; frac_pv: n_finite=94795 mean=+0.557; frac_npv: n_finite=94795 mean=+0.208; frac_soil: n_finite=94795 mean=+0.137; mesma_rmse: mean=0.0099 p50=0.0074
+  - **[OK] `mesma_image_endmembers`** — 14.9s
+      engine=mesma constraints=physical[0,1] regions={'char': 7871, 'pv': 101770, 'npv': 13763, 'soil': 2236}; pixels_outside_unit_interval=0; frac_char: n_finite=94627 mean=+0.104 min=+0.000 max=+1.000; frac_pv: n_finite=94627 mean=+0.551 min=+0.000 max=+1.000; frac_npv: n_finite=94627 mean=+0.215 min=+0.000 max=+1.000; frac_soil: n_finite=94627 mean=+0.130 min=+0.000 max=+1.000; mesma_rmse: mean=0.0099 p50=0.0075
       - `outputs/20241215_frac_char.tif`
       - `outputs/20241215_frac_pv.tif`
       - `outputs/20241215_frac_npv.tif`

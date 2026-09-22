@@ -102,6 +102,8 @@ def _write_geotiff(da: xr.DataArray, path: Path, crs: str | None) -> Path:
             rio_da = rio_da.rio.set_spatial_dims(x_dim="x", y_dim="y", inplace=False)
         if crs is not None:
             rio_da = rio_da.rio.write_crs(crs, inplace=False)
+        # Declare NaN as nodata so readers do not treat masked cells as data.
+        rio_da = rio_da.rio.write_nodata(np.nan, inplace=False)
         rio_da.rio.to_raster(str(path), compress="DEFLATE", dtype="float32")
         return path
     except Exception:
@@ -335,7 +337,7 @@ def stage_mesma_image(scene: xr.Dataset, scene_id: str, out_dir: Path) -> tuple[
     average each region's spectrum to seed a small endmember library. This is
     a coarse stand-in — the result is documented in the report as such.
     """
-    from tanager.unmixing import normalize_fractions, run_mesma
+    from tanager.unmixing import SHADE_NORMALIZED_CONSTRAINTS, normalize_fractions, run_mesma
 
     # Derive coarse class regions from spectral indices.
     nbr_da = nbr(scene)
@@ -412,8 +414,17 @@ def stage_mesma_image(scene: xr.Dataset, scene_id: str, out_dir: Path) -> tuple[
         dtype=np.float32,
     )
     refl_clean = refl.drop_vars(("fwhm", "good_wavelengths"), errors="ignore")
-    fractions = run_mesma(refl_clean, library, bands=band_subset)
+    # The saved product is shade-normalized, so the raw model must satisfy
+    # physical fraction bounds: the tolerant Roberts constraints would be
+    # amplified by 1/(1 - shade) into values outside [0, 1], and clipping them
+    # afterwards would hide non-physical models. With physical bounds the
+    # normalized fractions are in [0, 1] by construction; pixels with no
+    # physical model stay NaN.
+    fractions = run_mesma(
+        refl_clean, library, constraints=SHADE_NORMALIZED_CONSTRAINTS, bands=band_subset
+    )
     fractions = normalize_fractions(fractions)
+    n_outside = int(fractions.attrs.get("n_pixels_outside_unit_interval", 0))
 
     crs = _crs_for(scene)
     artifacts: list[Path] = []
@@ -421,20 +432,32 @@ def stage_mesma_image(scene: xr.Dataset, scene_id: str, out_dir: Path) -> tuple[
     for var in fractions.data_vars:
         if var == "rmse":
             continue
-        da = fractions[var]
+        da = fractions[var].assign_attrs(
+            units="fraction",
+            long_name=f"MESMA {var} fraction after shade normalization",
+        )
         tif = out_dir / f"{scene_id}_frac_{var}.tif"
         artifacts.append(_write_geotiff(da, tif, crs))
         s = _stat_summary(da)
-        stats_lines.append(f"frac_{var}: n_finite={s['n_finite']} mean={s['mean']:+.3f}")
+        stats_lines.append(
+            f"frac_{var}: n_finite={s['n_finite']} mean={s['mean']:+.3f} "
+            f"min={s['min']:+.3f} max={s['max']:+.3f}"
+        )
 
     if "rmse" in fractions:
         rmse_tif = out_dir / f"{scene_id}_mesma_rmse.tif"
-        artifacts.append(_write_geotiff(fractions["rmse"], rmse_tif, crs))
-        s = _stat_summary(fractions["rmse"])
+        rmse_da = fractions["rmse"].assign_attrs(
+            units="reflectance", long_name="MESMA best-model RMSE"
+        )
+        artifacts.append(_write_geotiff(rmse_da, rmse_tif, crs))
+        s = _stat_summary(rmse_da)
         stats_lines.append(f"mesma_rmse: mean={s['mean']:.4f} p50={s['p50']:.4f}")
 
     engine = fractions.attrs.get("unmixing_engine", "?")
-    detail = f"engine={engine} regions={region_pixels}; " + "; ".join(stats_lines)
+    detail = (
+        f"engine={engine} constraints=physical[0,1] regions={region_pixels}; "
+        f"pixels_outside_unit_interval={n_outside}; " + "; ".join(stats_lines)
+    )
     return detail, artifacts
 
 
