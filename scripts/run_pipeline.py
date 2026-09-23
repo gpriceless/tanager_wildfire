@@ -37,7 +37,11 @@ if str(SRC_PATH) not in sys.path:
 
 import tanager  # noqa: E402
 from tanager.config import EMIT_SENSOR, PRISMA_SENSOR, SENTINEL2_BANDS  # noqa: E402
-from tanager.io import get_spatial_info, load_ortho_scene  # noqa: E402
+from tanager.io import (  # noqa: E402
+    get_spatial_info,
+    load_ortho_scene,
+    write_product_raster,
+)
 from tanager.lfmc import compute_lfmc_indices  # noqa: E402
 from tanager.masks import apply_masks, cloud_mask, nodata_mask, water_mask  # noqa: E402
 from tanager.spectral import clamp_reflectance, dnbr, nbr, ndvi, ndwi  # noqa: E402
@@ -89,23 +93,22 @@ class SceneReport:
 
 
 def _write_geotiff(da: xr.DataArray, path: Path, crs: str | None) -> Path:
-    """Write a 2-D DataArray to GeoTIFF via rioxarray.
+    """Write a 2-D DataArray to GeoTIFF via the shared product save path.
 
-    Falls back to NumPy ``.npy`` if rioxarray cannot find a CRS / spatial dims.
+    ``write_product_raster`` declares NaN as nodata and stamps the product's
+    ``units`` / ``long_name`` tags, so every artifact this pipeline emits is
+    self-describing. Falls back to NumPy ``.npy`` if rioxarray cannot write the
+    raster (no CRS / spatial dims).
+
+    An unregistered product name is *not* caught: a new product silently landing
+    as an untagged ``.npy`` is how untitled rasters got onto disk in the first
+    place. Register it in ``tanager.io.PRODUCT_METADATA`` instead.
     """
-    import rioxarray  # noqa: F401  (registers .rio accessor)
-
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        rio_da = da
-        if "x" in rio_da.dims and "y" in rio_da.dims:
-            rio_da = rio_da.rio.set_spatial_dims(x_dim="x", y_dim="y", inplace=False)
-        if crs is not None:
-            rio_da = rio_da.rio.write_crs(crs, inplace=False)
-        # Declare NaN as nodata so readers do not treat masked cells as data.
-        rio_da = rio_da.rio.write_nodata(np.nan, inplace=False)
-        rio_da.rio.to_raster(str(path), compress="DEFLATE", dtype="float32")
-        return path
+        return write_product_raster(da, path, crs=crs)
+    except KeyError:
+        raise
     except Exception:
         # Fall back to npy so we still capture the data.
         npy = path.with_suffix(".npy")

@@ -34,6 +34,7 @@ requested.
 import logging
 import re
 from os import PathLike
+from pathlib import Path
 from typing import Optional, Union
 
 import numpy as np
@@ -827,3 +828,234 @@ def reproject_to_common_grid(
             )
 
     return aligned
+
+
+# ---------------------------------------------------------------------------
+# Product raster writing
+# ---------------------------------------------------------------------------
+
+# Every product raster this pipeline writes carries `units` and `long_name`
+# so a reader can tell a fraction raster from a percent raster from the file
+# alone. Keys are the product suffix of the filename stem — `20241215_ndvi`
+# resolves to "ndvi", `20241215_to_20250123swath2_dnbr` to "dnbr". Indices
+# built from a normalized difference or a hull-relative depth are ratios of
+# reflectances and so are dimensionless; `fraction` marks a value on [0, 1]
+# that sums with its siblings; `reflectance` marks a quantity in the same
+# units as the input surface reflectance.
+PRODUCT_METADATA: dict[str, dict[str, str]] = {
+    "ndvi": {
+        "units": "dimensionless",
+        "long_name": "Normalized Difference Vegetation Index",
+    },
+    "nbr": {
+        "units": "dimensionless",
+        "long_name": "Normalized Burn Ratio",
+    },
+    "ndwi": {
+        "units": "dimensionless",
+        "long_name": "Normalized Difference Water Index",
+    },
+    "dnbr": {
+        "units": "dimensionless",
+        "long_name": "Differenced Normalized Burn Ratio (pre-fire NBR minus post-fire NBR)",
+    },
+    "wi": {
+        "units": "dimensionless",
+        "long_name": "Water Index, R900 / R970 (Penuelas et al. 1993)",
+    },
+    "mesma_rmse": {
+        "units": "reflectance",
+        "long_name": "MESMA best-model RMSE",
+    },
+    "frac_pv": {
+        "units": "fraction",
+        "long_name": "MESMA pv fraction after shade normalization",
+    },
+    "frac_npv": {
+        "units": "fraction",
+        "long_name": "MESMA npv fraction after shade normalization",
+    },
+    "frac_soil": {
+        "units": "fraction",
+        "long_name": "MESMA soil fraction after shade normalization",
+    },
+    "frac_char": {
+        "units": "fraction",
+        "long_name": "MESMA char fraction after shade normalization",
+    },
+    "barc_severity": {
+        "units": "class",
+        "long_name": "BARC severity class code",
+    },
+}
+
+# Products whose name carries the wavelength they were computed at. The regex
+# captures that wavelength so the long_name names the actual feature rather
+# than a generic family label.
+_PRODUCT_PATTERNS: list[tuple[re.Pattern, str, str]] = [
+    (
+        re.compile(r"^cr_depths_(\d+)nm$"),
+        "dimensionless",
+        "Continuum-removal absorption depth at {0} nm",
+    ),
+    (
+        re.compile(r"^sai(\d+)$"),
+        "dimensionless",
+        "Spectral Absorption Index at {0} nm",
+    ),
+    (
+        re.compile(r"^ndwi_(\d+)$"),
+        "dimensionless",
+        "Normalized Difference Water Index, R860 vs R{0}",
+    ),
+]
+
+
+def product_metadata(name: str) -> Optional[dict[str, str]]:
+    """Resolve a product raster name to its ``units`` / ``long_name`` tags.
+
+    Accepts either a bare product key (``"ndvi"``) or a full filename stem
+    carrying a scene prefix (``"20241215_CR_depths_1200nm"``). Underscore
+    token runs are tried longest-first so ``20241215_frac_char`` resolves to
+    ``frac_char`` rather than to a shorter suffix.
+
+    Args:
+        name: Product key, filename stem, or filename.
+
+    Returns:
+        A new dict with ``units`` and ``long_name``, or ``None`` when the name
+        matches no registered product. Callers should treat ``None`` as "this
+        product has no declared metadata yet" and add it to
+        :data:`PRODUCT_METADATA` rather than inventing tags at the call site.
+    """
+    stem = str(name).split("/")[-1]
+    if "." in stem:
+        stem = stem.rsplit(".", 1)[0]
+
+    tokens = stem.split("_")
+    for start in range(len(tokens)):
+        candidate = "_".join(tokens[start:]).lower()
+        if candidate in PRODUCT_METADATA:
+            return dict(PRODUCT_METADATA[candidate])
+        for pattern, units, long_name in _PRODUCT_PATTERNS:
+            match = pattern.match(candidate)
+            if match:
+                return {"units": units, "long_name": long_name.format(*match.groups())}
+    return None
+
+
+def stamp_raster_metadata(
+    path: FilePath,
+    meta: Optional[dict[str, str]] = None,
+    declare_nodata: bool = True,
+) -> dict[str, str]:
+    """Declare nodata and stamp ``units`` / ``long_name`` on an existing raster.
+
+    Metadata-only: the pixel buffer is opened in update mode but never written,
+    so values are untouched. Both the dataset tags and the band description are
+    set, because readers disagree on which one they surface — ``rioxarray``
+    falls back to the band description for ``long_name``, which on products
+    written before this function existed still said ``surface_reflectance``
+    (the name of the array the index was derived from, not the index).
+
+    Args:
+        path: Raster to update in place.
+        meta: ``units`` / ``long_name`` to write. Defaults to the registry
+            lookup for the file's stem.
+        declare_nodata: When True and the file declares no nodata value, set it
+            to NaN for float bands. Integer bands are left alone — NaN is not
+            representable and guessing a sentinel would corrupt class codes.
+
+    Returns:
+        The metadata written.
+
+    Raises:
+        KeyError: If ``meta`` is None and the product is not registered.
+    """
+    import rasterio
+
+    path = Path(path)
+    if meta is None:
+        meta = product_metadata(path.stem)
+    if meta is None:
+        raise KeyError(
+            f"No product metadata registered for {path.stem!r}; add it to "
+            f"tanager.io.PRODUCT_METADATA so the raster declares its units"
+        )
+
+    with rasterio.open(path, "r+") as dst:
+        if (
+            declare_nodata
+            and dst.nodata is None
+            and all(np.issubdtype(np.dtype(d), np.floating) for d in dst.dtypes)
+        ):
+            dst.nodata = np.nan
+        dst.update_tags(**meta)
+        for band in range(1, dst.count + 1):
+            dst.set_band_description(band, meta["long_name"])
+    return dict(meta)
+
+
+def write_product_raster(
+    da: xr.DataArray,
+    path: FilePath,
+    crs: Optional[str] = None,
+    product: Optional[str] = None,
+    dtype: str = "float32",
+) -> Path:
+    """Write a 2-D product DataArray to GeoTIFF with declared nodata and tags.
+
+    This is the single save path for pipeline products. It declares NaN as the
+    nodata value so readers that honour the flag (QGIS statistics,
+    ``gdalinfo -stats``, masked ``rasterio`` reads) exclude masked cells
+    instead of averaging them in, and it writes ``units`` / ``long_name`` tags
+    resolved from :data:`PRODUCT_METADATA`.
+
+    Metadata already present on ``da.attrs`` wins over the registry, so a
+    caller that computed a more specific label can pass it through.
+
+    Args:
+        da: 2-D DataArray with ``x`` / ``y`` dims.
+        path: Destination ``.tif`` path.
+        crs: CRS to stamp, e.g. ``"EPSG:32611"``. ``None`` leaves whatever CRS
+            the DataArray already carries.
+        product: Product key or filename stem used to look up the tags.
+            Defaults to the stem of ``path``.
+        dtype: On-disk dtype.
+
+    Returns:
+        The path written.
+
+    Raises:
+        KeyError: If no metadata is registered for the resolved product name.
+            Tags are never guessed — register the product instead.
+    """
+    import rioxarray  # noqa: F401  (registers the .rio accessor)
+
+    path = Path(path)
+    lookup = product if product is not None else path.stem
+    meta = product_metadata(lookup)
+    if meta is None:
+        raise KeyError(
+            f"No product metadata registered for {lookup!r}; add it to "
+            f"tanager.io.PRODUCT_METADATA so the raster declares its units"
+        )
+    # A caller-supplied label is more specific than the registry default.
+    for key in ("units", "long_name"):
+        if key in da.attrs and da.attrs[key]:
+            meta[key] = str(da.attrs[key])
+
+    rio_da = da
+    if "x" in rio_da.dims and "y" in rio_da.dims:
+        rio_da = rio_da.rio.set_spatial_dims(x_dim="x", y_dim="y", inplace=False)
+    if crs is not None:
+        rio_da = rio_da.rio.write_crs(crs, inplace=False)
+    rio_da = rio_da.rio.write_nodata(np.nan, inplace=False)
+    rio_da = rio_da.assign_attrs(**meta)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rio_da.rio.to_raster(str(path), compress="DEFLATE", dtype=dtype, tags=meta)
+    # to_raster derives the band description from the array name, which is the
+    # array the product was computed from, not the product. Overwrite it.
+    stamp_raster_metadata(path, meta=meta)
+    return path
