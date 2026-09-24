@@ -30,9 +30,16 @@ SERVICE = (
 OUT = pathlib.Path("data/reference/perimeters/la_fires_2025.geojson")
 
 # (query name, discovery date, published acres, display name)
+#
+# Kenneth is here because unmixing the 2025-01-23 swath found a 1.4 km² patch of
+# char at 34.174 N, -118.686 W that sits outside both of the other two
+# perimeters. It is a real burn scar — Kenneth ignited on 2025-01-09, two weeks
+# before the scene — and while it was missing from this file it was being
+# counted as unburned reference area in every inside/outside comparison.
 WANTED = [
     ("PALISADES", "2025-01-07", 23448, "Palisades"),
     ("Franklin", "2024-12-10", 4089, "Franklin"),
+    ("KENNETH", "2025-01-09", 999, "Kenneth"),
 ]
 
 ACRE_TOLERANCE = 0.02
