@@ -335,10 +335,16 @@ def stage_lfmc_indices(scene: xr.Dataset, scene_id: str, out_dir: Path,
 def stage_mesma_image(scene: xr.Dataset, scene_id: str, out_dir: Path) -> tuple[str, list[Path]]:
     """Best-effort MESMA: derive endmembers from the scene itself.
 
-    No ECOSTRESS / USGS library is available on this machine, so we fall back
-    to an image-derived approach: classify pixels by NBR / NDVI thresholds and
-    average each region's spectrum to seed a small endmember library. This is
-    a coarse stand-in — the result is documented in the report as such.
+    Classify pixels by NBR / NDVI thresholds and average each region's spectrum
+    to seed a small endmember library. This is a coarse stand-in, and it is
+    circular for anything that reads the char fraction as burn extent: char is
+    defined here as "the pixels with NBR < -0.1", so the fraction cannot
+    disagree with the threshold that produced it.
+
+    ``scripts/palisades_mesma.py`` runs the same unmixing against a library
+    built entirely from USGS splib07a (``data/reference/endmembers/``), which
+    has no contact with the image. Prefer that path for any product whose char
+    fraction will be compared with an external reference.
     """
     from tanager.unmixing import SHADE_NORMALIZED_CONSTRAINTS, normalize_fractions, run_mesma
 
