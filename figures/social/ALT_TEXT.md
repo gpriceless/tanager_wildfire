@@ -3,7 +3,8 @@
 Paste the matching block into the image's alt-text field when posting.
 Bluesky enforces a 1 MB upload cap; `square/` holds 1080x1080 JPEGs
 under that limit, and the PNGs in this directory are the full-size
-originals for LinkedIn and the portfolio.
+originals for LinkedIn and the portfolio. The GIFs are already under
+the cap and are posted as-is.
 
 ## before_after.png
 
@@ -40,3 +41,11 @@ Left, a burn severity map with 2,046 CAL FIRE structure inspections plotted as c
 ## water_content.png
 
 Map of canopy water content across north Los Angeles County on 7 April 2025, from the depth of the 970-nanometre water absorption feature. Blue areas hold more water in the vegetation; brown ridges and drainages are drier. A note records that the values are relative and not calibrated against field fuel-moisture measurements.
+
+## hughes_recovery.gif
+
+Two-frame animation of the Hughes Fire footprint near Castaic Lake that cuts between 23 January 2025 and 7 April 2025. The first frame is mostly bare brown burned ground. Seventy-four days later the same hills are broadly green, showing vegetation that has regrown, with mean Normalized Burn Ratio rising from 0.017 to 0.192.
+
+## palisades_before_after.gif
+
+Two-frame animation of the Santa Monica Mountains that cuts between 15 December 2024 and 23 January 2025. In the first frame the hills inside a yellow outline are green with living chaparral. In the second frame everything inside that outline has turned dark brown, marking where the Palisades Fire burned. The outline is the official NIFC fire perimeter and it matches the brown area closely.

@@ -78,6 +78,8 @@ def fig_before_after() -> None:
     for ax in (ax1, ax2):
         ax.set_xlim(ext[0], ext[1])
         ax.set_ylim(ext[2], ext[3])
+    sb.overlay_perimeter(ax1, "Franklin", color="#8ab4ff", linewidth=1.5)
+    sb.overlay_perimeter(ax2, "Palisades", color="#ffe9a8", linewidth=1.5)
     sb.map_furniture(ax1, scale_km=5, avoid=[(0.0, 0.84, 0.68, 1.0)])
     sb.map_furniture(ax2, scale_km=5, avoid=[(0.0, 0.84, 0.84, 1.0)])
 
@@ -150,14 +152,14 @@ def fig_hero_severity() -> None:
         zorder=12, alpha=0.95,
     )
 
+    sb.overlay_perimeter(ax, "Palisades", color="#ffe9a8", linewidth=1.8)
     sb.map_furniture(ax, scale_km=5, inset=True,
                      avoid=[(0.0, 0.79, 0.55, 1.0)])
 
     sb.headline(
         ax, "Where the fire burned hottest",
-        "Burn severity measured by Planet's Tanager-1 hyperspectral satellite.\n"
-        f"White squares are {len(destroyed):,} structures CAL FIRE inspectors\n"
-        "walked up to and recorded as destroyed.",
+        "Measured by Planet's Tanager-1 hyperspectral satellite. Inside the\n"
+        "official fire perimeter the median dNBR is 0.588; outside it, 0.046.",
         title_size=22, width=0.50,
     )
 
@@ -169,12 +171,17 @@ def fig_hero_severity() -> None:
     cbar.outline.set_edgecolor("#2a2a44")
 
     ax.legend(
-        handles=[Line2D([0], [0], marker="s", color="none",
-                        markerfacecolor="#ffffff", markeredgecolor="#000000",
-                        markersize=7, label="Structure destroyed (CAL FIRE)")],
+        handles=[
+            Line2D([0], [0], marker="s", color="none",
+                   markerfacecolor="#ffffff", markeredgecolor="#000000",
+                   markersize=7,
+                   label=f"{len(destroyed):,} structures destroyed (CAL FIRE)"),
+            Line2D([0], [0], color="#ffe9a8", lw=1.8,
+                   label="Official Palisades Fire perimeter (NIFC)"),
+        ],
         loc="upper left", frameon=True, facecolor="#07070fe6",
         edgecolor="#2e2e4a", fontsize=10, labelcolor=sb.TEXT_COLOR,
-        bbox_to_anchor=(0.018, 0.775),
+        bbox_to_anchor=(0.018, 0.775),  # just under the headline plate
     )
 
     sb.credit(ax)
@@ -212,6 +219,7 @@ def fig_char_fraction() -> None:
     sb.add_basemap(ax, alpha=0.38)
     ax.set_xlim(ext[0], ext[1])
     ax.set_ylim(ext[2], ext[3])
+    sb.overlay_perimeter(ax, "Franklin", color="#8ab4ff", linewidth=1.8)
     sb.map_furniture(ax, scale_km=3, avoid=[(0.0, 0.76, 0.58, 1.0)])
 
     sb.headline(
@@ -219,8 +227,9 @@ def fig_char_fraction() -> None:
         "A normal satellite says “burned.” Every 30 m pixel here is unmixed into\n"
         "char, living plant, dry plant and soil — the combination that best\n"
         "reproduces its measured 426-band spectrum.\n"
-        "Franklin Fire scar, Malibu Canyon, imaged 15 December 2024.",
-        title_size=24, width=0.56,
+        "Franklin Fire scar, Malibu Canyon, imaged 15 December 2024. Inside the\n"
+        "blue perimeter char averages 0.490; outside it, 0.047.",
+        title_size=24, width=0.58,
     )
 
     cbar = fig.colorbar(im, ax=ax, shrink=0.55, pad=0.012, aspect=24)
@@ -601,6 +610,7 @@ def fig_structures() -> None:
                     facecolor=color, edgecolor="#000000", linewidth=0.2,
                     zorder=12, alpha=0.9, label=f"{label}  ({len(g):,})")
 
+    sb.overlay_perimeter(axm, "Palisades", color="#ffe9a8", linewidth=1.6)
     sb.map_furniture(axm, scale_km=5, avoid=[(0.0, 0.82, 0.72, 1.0)])
     axm.legend(loc="lower left", frameon=True, facecolor="#0b0b14ee",
                edgecolor="#2a2a44", fontsize=9, labelcolor=sb.TEXT_COLOR,
