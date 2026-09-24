@@ -802,8 +802,13 @@ def normalize_fractions(
         return fractions.copy()
 
     shade = fractions["shade"]
-    other_vars = [v for v in _CANONICAL_FRACTIONS if v != "shade" and v in fractions]
+    canonical_vars = [v for v in _CANONICAL_FRACTIONS if v != "shade" and v in fractions]
     extras = [v for v in fractions.data_vars if v not in _CANONICAL_FRACTIONS and v != "rmse"]
+    # A library may carry classes outside the canonical five (e.g. built
+    # materials). They hold real fraction mass, so they belong in the
+    # denominator and in the range check — normalizing them against a
+    # canonical-only sum pushes them above 1 and breaks sum-to-one silently.
+    other_vars = [*canonical_vars, *extras]
 
     # Under MESMA's sum-to-one constraint the non-shade fractions sum to
     # exactly 1 - shade, so the two are interchangeable as the denominator.
@@ -823,7 +828,7 @@ def normalize_fractions(
         safe_denom = xr.where(illuminated, denom, np.nan)
 
     out = xr.Dataset()
-    for var in (*other_vars, *extras):
+    for var in other_vars:
         out[var] = (fractions[var] / safe_denom).astype(np.float32)
 
     if "rmse" in fractions:

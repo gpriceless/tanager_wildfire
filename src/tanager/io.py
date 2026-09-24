@@ -883,6 +883,14 @@ PRODUCT_METADATA: dict[str, dict[str, str]] = {
         "units": "fraction",
         "long_name": "MESMA char fraction after shade normalization",
     },
+    "frac_urban": {
+        "units": "fraction",
+        "long_name": "MESMA intact built-material fraction after shade normalization",
+    },
+    "frac_debris": {
+        "units": "fraction",
+        "long_name": "MESMA building-debris fraction after shade normalization",
+    },
     "barc_severity": {
         "units": "class",
         "long_name": "BARC severity class code",

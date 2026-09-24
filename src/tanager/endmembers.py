@@ -170,6 +170,38 @@ def _read_usgs_ascii_column(path: Path) -> np.ndarray:
     return arr
 
 
+def _interpolate_deleted_channels(
+    reflectance: np.ndarray, wavelengths_nm: np.ndarray
+) -> np.ndarray:
+    """Fill USGS deleted channels by interpolating over the wavelength axis.
+
+    splib07 marks channels the analyst removed (detector overlaps near 1000 and
+    1800 nm, saturated atmospheric water bands) with the ``-1.23e34`` sentinel,
+    which :func:`_read_usgs_ascii_column` turns into NaN. Substituting zero
+    there would invent a total-absorption feature at exactly the wavelengths
+    MESMA leans on, so interpolate across the gap instead and hold the nearest
+    valid value beyond the ends.
+
+    Args:
+        reflectance: 1D reflectance array, NaN at deleted channels.
+        wavelengths_nm: 1D wavelength axis of the same length.
+
+    Returns:
+        1D array with no NaNs. An all-NaN input is returned as zeros, matching
+        the caller's "no usable spectrum" handling.
+    """
+    valid = np.isfinite(reflectance)
+    if valid.all():
+        return reflectance
+    if not valid.any():
+        return np.zeros_like(reflectance)
+    return np.interp(
+        wavelengths_nm.astype(np.float64),
+        wavelengths_nm[valid].astype(np.float64),
+        reflectance[valid].astype(np.float64),
+    ).astype(np.float32)
+
+
 def _detect_usgs_wavelength_file(data_dir: Path, sensor_hint: str = "ASD") -> Path:
     """Find the splib07a wavelength index file for a given sensor convolution.
 
@@ -251,8 +283,26 @@ def load_usgs_library(
     wavelengths_um = _read_usgs_ascii_column(wl_path)
     wavelengths_nm = wavelengths_um * 1000.0  # USGS files store micrometres
 
-    pattern = re.compile(rf"s07[a-z0-9]*{re.escape(sensor_hint)}", re.IGNORECASE)
-    spectrum_paths = sorted(p for p in root.rglob("*.txt") if pattern.search(p.name) and p != wl_path)
+    # Two naming conventions are accepted. ``ASCIIdata_splib07a.zip`` as
+    # published names every spectrum
+    # ``splib07a_<Material>_<Sample>_<INSTRUMENT><suffix>_<AREF|RREF|TRAN>.txt``
+    # and files them under ``Chapter*/``; the ``s07<INSTRUMENT>_`` form is the
+    # shorter convention used by re-packaged copies of the library. Matching
+    # only the latter silently returns "no spectrum files" on the real archive.
+    hint = re.escape(sensor_hint)
+    pattern_repack = re.compile(rf"^s07[a-z0-9]*{hint}", re.IGNORECASE)
+    pattern_published = re.compile(
+        rf"^splib07[ab]_.+_{hint}[a-z0-9]*_(?:AREF|RREF|TRAN)$", re.IGNORECASE
+    )
+    spectrum_paths = sorted(
+        p
+        for p in root.rglob("*.txt")
+        if p != wl_path
+        # ``errorbars/`` holds one uncertainty file per spectrum on the same
+        # wavelength grid; they are not reflectance and must not be loaded.
+        and p.parent.name.lower() != "errorbars"
+        and (pattern_repack.search(p.stem) or pattern_published.search(p.stem))
+    )
     if not spectrum_paths:
         raise FileNotFoundError(
             f"No spectrum files matching sensor hint {sensor_hint!r} found under {root}"
@@ -292,7 +342,7 @@ def load_usgs_library(
         if keep_categories is not None and cat not in keep_categories:
             continue
 
-        rows.append(np.nan_to_num(refl, nan=0.0))
+        rows.append(_interpolate_deleted_channels(refl, wavelengths_nm))
         spectrum_ids.append(f"usgs_{cat}_{len(rows):04d}")
         names.append(stem)
         cats.append(cat)

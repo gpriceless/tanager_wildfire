@@ -329,6 +329,34 @@ class TestNormalizeFractions:
         total = sum(out[v].values for v in ("char", "pv", "npv", "soil"))
         np.testing.assert_allclose(total, 1.0, atol=1e-4)
 
+    def test_non_canonical_classes_share_the_denominator(self):
+        # A library may carry classes beyond the canonical five (built
+        # materials, debris). They hold real fraction mass, so the rescaling
+        # denominator has to include them: normalizing a 0.30 urban fraction
+        # against a canonical-only sum of 0.30 returns 1.0 for urban alone and
+        # a total of 2.0, which no range check on the canonical vars can see.
+        ds = xr.Dataset(
+            {
+                "char": (["y", "x"], np.array([[0.06]], dtype=np.float32)),
+                "pv": (["y", "x"], np.array([[0.10]], dtype=np.float32)),
+                "npv": (["y", "x"], np.array([[0.06]], dtype=np.float32)),
+                "soil": (["y", "x"], np.array([[0.08]], dtype=np.float32)),
+                "urban": (["y", "x"], np.array([[0.18]], dtype=np.float32)),
+                "debris": (["y", "x"], np.array([[0.12]], dtype=np.float32)),
+                "shade": (["y", "x"], np.array([[0.40]], dtype=np.float32)),
+                "rmse": (["y", "x"], np.array([[0.01]], dtype=np.float32)),
+            },
+            coords={"y": [0], "x": [0]},
+        )
+
+        out = normalize_fractions(ds, remove_shade=True)
+
+        classes = ("char", "pv", "npv", "soil", "urban", "debris")
+        total = sum(out[v].values for v in classes)
+        np.testing.assert_allclose(total, 1.0, atol=1e-5)
+        np.testing.assert_allclose(float(out["urban"].values[0, 0]), 0.18 / 0.6, rtol=1e-5)
+        assert out.attrs["n_pixels_outside_unit_interval"] == 0
+
     def test_physical_raw_fractions_stay_in_unit_interval_without_clipping(self):
         # Under SHADE_NORMALIZED_CONSTRAINTS every raw fraction lies in
         # [0, 1 - shade], so dividing by (1 - shade) lands in [0, 1] with no
