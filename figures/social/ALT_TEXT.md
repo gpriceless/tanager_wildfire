@@ -26,6 +26,10 @@ Burn severity map of the western Palisades Fire footprint from Planet Tanager-1.
 
 A hyperspectral data cube drawn in three dimensions. The top face is a natural-colour satellite image of the Santa Monica Mountains. The front and right faces glow in purple, orange and yellow, showing reflectance across all 426 spectral bands from 376 to 2499 nanometres. Two solid black horizontal stripes cross both faces where atmospheric water vapour blocks the signal.
 
+## palisades_char.png
+
+Map of the Palisades Fire footprint in the Santa Monica Mountains. Colour shows the fraction of each 30-metre pixel made of char, from dark through orange to white, derived by unmixing the 426-band spectrum against a USGS reference library. A blue outline marks the official fire perimeter; the bright char fills it closely. A second patch of char sits west of the outline, in the separate Franklin Fire scar. Median char inside the perimeter is 0.389 against 0.000 outside every known fire perimeter.
+
 ## sensor_comparison.png
 
 Horizontal bar chart. Agreement with Tanager-1's char fraction map after resampling the same pixels down to each sensor's bands: Tanager-1 with 426 bands scores 1.000, EMIT with 285 bands 0.991, PRISMA with 239 bands 0.957, and Sentinel-2 with 10 bands only 0.361. An arrow spans the gap between Sentinel-2 and the hyperspectral sensors.

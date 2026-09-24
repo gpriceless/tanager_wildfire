@@ -194,15 +194,74 @@ def fig_hero_severity() -> None:
 # 3. Char fraction — the sub-pixel reveal
 # ---------------------------------------------------------------------------
 
+def fig_palisades_char() -> None:
+    """MESMA char fraction over the Palisades Fire, from an external library.
+
+    Uses ``20250123swath2_frac_char.tif``, unmixed with the USGS splib07a
+    library built by ``scripts/build_fire_endmember_library.py``. That library
+    has no contact with the imagery, which is what makes the perimeter
+    comparison out-of-sample: the older image-derived endmembers defined char
+    as "the pixels that look burned", so their char fraction could not disagree
+    with the threshold that produced it.
+
+    Scored by ``scripts/validate_char_fractions.py``: inside the official
+    Palisades perimeter the median is 0.389 against 0.000 outside every
+    perimeter, AUC 0.795.
+    """
+    print("  [3a] Char fraction (Palisades, external library) ...")
+    char = sb.crop(sb.load("20250123swath2_frac_char.tif", mask_water=True))
+    ext = sb.extent_of()
+
+    fig, ax = plt.subplots(figsize=(13, 8.5), dpi=200)
+    sb.style_dark(fig, ax)
+
+    im = ax.imshow(
+        np.ma.masked_invalid(char.values), extent=ext, origin="upper",
+        cmap=sb.FIRE_CMAP, vmin=0, vmax=1.0, interpolation="nearest",
+        alpha=0.9, zorder=2,
+    )
+    sb.add_basemap(ax, alpha=0.38)
+    ax.set_xlim(ext[0], ext[1])
+    ax.set_ylim(ext[2], ext[3])
+    sb.overlay_perimeter(ax, "Palisades", color="#8ab4ff", linewidth=1.8)
+    sb.map_furniture(ax, scale_km=5, avoid=[(0.0, 0.76, 0.58, 1.0)])
+
+    sb.headline(
+        ax, "How much of this pixel burned?",
+        "Each 30 m pixel unmixed into char, plant, dry plant and soil against a\n"
+        "USGS reference library that never saw this image. Inside the blue\n"
+        "perimeter the median char fraction is 0.389; outside every known fire\n"
+        "perimeter it is 0.000 (AUC 0.795).",
+        title_size=23, width=0.56,
+    )
+
+    cbar = fig.colorbar(im, ax=ax, shrink=0.55, pad=0.012, aspect=24)
+    cbar.set_label("Share of each pixel that is char", color=sb.TEXT_COLOR,
+                   fontsize=11)
+    cbar.set_ticks([0, 0.25, 0.5, 0.75, 1.0])
+    cbar.set_ticklabels(["None", "25%", "50%", "75%", "All"])
+    cbar.ax.tick_params(colors=sb.TEXT_COLOR, labelsize=9.5)
+    cbar.outline.set_edgecolor("#2a2a44")
+
+    ax.text(0.022, 0.085,
+            "Resolves wildland burn, not building damage: against CAL FIRE's\n"
+            "structure survey the same map scores AUC 0.530, near chance.",
+            transform=ax.transAxes, fontsize=9.5, color="#d8d8e8", va="bottom",
+            zorder=10, style="italic",
+            path_effects=[pe.withStroke(linewidth=2.6, foreground="#000000dd")])
+
+    sb.credit(ax)
+    fig.tight_layout(pad=0.5)
+    print("      ->", sb.save(fig, "palisades_char.png"))
+    plt.close(fig)
+
+
 def fig_char_fraction() -> None:
     """MESMA char fraction over the Franklin Fire scar.
 
-    The only MESMA fraction rasters the pipeline produces are for the
-    2024-12-15 scene (``run_pipeline.py`` sets ``do_mesma = scene_id ==
-    "20241215"``). That scene predates the Palisades Fire, so the burn it
-    resolves is the Franklin Fire of 9-18 December 2024, not Palisades. The
-    figure is titled accordingly. Producing the equivalent map for Palisades
-    needs a MESMA run on the 2025-01-23 swath.
+    Kept alongside the Palisades map because it is the same method on a second,
+    independent fire: the 2024-12-15 scene predates the Palisades Fire, so the
+    burn it resolves is the Franklin Fire of 9-18 December 2024.
     """
     print("  [3] Char fraction (Franklin Fire scar) ...")
     char = sb.crop(sb.load("20241215_frac_char.tif"), frame=FRANKLIN_FRAME)
@@ -807,6 +866,7 @@ def fig_water_content() -> None:
 FIGURES = [
     fig_before_after,
     fig_hero_severity,
+    fig_palisades_char,
     fig_char_fraction,
     fig_hypercube,
     fig_spectral_signatures,

@@ -45,6 +45,16 @@ ALT_TEXT: dict[str, str] = {
         "mark 984 structures CAL FIRE inspectors recorded as destroyed. An "
         "inset locates the scene in Southern California."
     ),
+    "palisades_char.png": (
+        "Map of the Palisades Fire footprint in the Santa Monica Mountains. "
+        "Colour shows the fraction of each 30-metre pixel made of char, from "
+        "dark through orange to white, derived by unmixing the 426-band "
+        "spectrum against a USGS reference library. A blue outline marks the "
+        "official fire perimeter; the bright char fills it closely. A second "
+        "patch of char sits west of the outline, in the separate Franklin Fire "
+        "scar. Median char inside the perimeter is 0.389 against 0.000 outside "
+        "every known fire perimeter."
+    ),
     "char_fraction.png": (
         "Map of the Franklin Fire scar in Malibu Canyon, imaged 15 December "
         "2024. Colour shows the fraction of each 30-metre pixel made of char, "
