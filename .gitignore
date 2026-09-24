@@ -66,3 +66,10 @@ data/reference/globe_lfmc/
 
 # Notebook-suite run logs are local run records, not deliverables.
 outputs/notebook-suite/
+
+# Exception: the spectral cache (~4.5 MB) holds the class-mean spectra, band
+# composites and datacube faces that three of the social figures are drawn
+# from. Regenerating it needs the 1.3 GB raw scene, which stays out of git, so
+# committing the cache is what keeps those figures reproducible from a clone.
+# Rebuild with scripts/extract_spectral_cache.py when the raw scene is present.
+!outputs/social_spectral_cache.npz
