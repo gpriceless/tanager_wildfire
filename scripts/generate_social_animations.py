@@ -130,7 +130,7 @@ def _frame(
         zorder=24, path_effects=[pe.withStroke(linewidth=2.6,
                                                foreground="#000000dd")],
     )
-    sb.credit(ax)
+    sb.credit(ax, basemap=True)
     fig.tight_layout(pad=0.4)
 
     fig.canvas.draw()

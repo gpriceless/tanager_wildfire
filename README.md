@@ -187,6 +187,41 @@ If you use FireSpec in your work, please cite it (see [`CITATION.cff`](CITATION.
 
 ---
 
+## Data and Imagery Credits
+
+The MIT license below covers FireSpec's code. It does not cover the third-party data
+and imagery rendered into `figures/social/`:
+
+- **Esri World Imagery basemap.** Eight of the tracked outputs —
+  `before_after.png`, `hero_severity.png`, `palisades_char.png`, `char_fraction.png`,
+  `structures.png`, `water_content.png`, `palisades_before_after.gif`, and
+  `hughes_recovery.gif` — render an Esri World Imagery basemap beneath the measured
+  data. It is used under Esri Master Agreement E204 (revised 1 Aug 2025) §3.2(b),
+  which permits static representations of the imagery (PDF/GIF/JPEG/HTML) in
+  documents distributed to third parties provided each representation carries an
+  attribution naming Esri and its licensors; each of the eight files does, in-image.
+  Required credit string (World Imagery item `10df2279f9684e4a9f6a7f08febac2a9`):
+  "Esri, Vantor, Earthstar Geographics, and the GIS User Community." These eight
+  files are not covered by the MIT license below — the basemap pixels in them remain
+  Esri's, used under the terms above, not FireSpec's to relicense.
+- **Planet Tanager-1 imagery.** The hyperspectral scenes themselves, and every
+  product derived from them (dNBR, NDVI, NBR, MESMA fractions, spectral signatures),
+  are Planet's, distributed for the [Tanager Open Data
+  Competition](https://www.planet.com/pulse/announcing-the-tanager-open-data-competition/);
+  Planet retains ownership under the competition's terms.
+- **CAL FIRE Damage Inspection (DINS) data** (`data/reference/dins/`, drawn in
+  `hero_severity.png` and `structures.png`) is published by the California
+  Department of Forestry and Fire Protection.
+- **NIFC/WFIGS fire perimeters** (`data/reference/perimeters/`, overlaid on several
+  figures) are published via the interagency WFIGS feature service (see
+  `scripts/fetch_fire_perimeters.py` for the source query).
+
+DINS and WFIGS are public government datasets; check their source services for
+specific terms before redistributing them outside this repository.
+
+---
+
 ## License
 
-Released under the [MIT License](LICENSE).
+Released under the [MIT License](LICENSE) for FireSpec's code. See "Data and
+Imagery Credits" above for the third-party data and imagery it renders.

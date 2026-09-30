@@ -6,6 +6,12 @@ under that limit, and the PNGs in this directory are the full-size
 originals for LinkedIn and the portfolio. The GIFs are already under
 the cap and are posted as-is.
 
+Eight of these files (before_after, hero_severity, palisades_char,
+char_fraction, structures, water_content, and both GIFs) carry an Esri
+World Imagery basemap, credited in-image and used under the Esri
+Master Agreement §3.2(b). See README.md for the full imagery/data
+credits.
+
 ## before_after.png
 
 Two satellite maps of the Santa Monica Mountains coastline side by side. Left, 15 December 2024: vegetation index shown in green across the hills, with a brown scar inland of Pepperdine University labelled as the Franklin Fire, which burned 9-18 December. Right, 23 January 2025: burn severity for the same area, with a large orange-red patch covering the eastern hills between Saddle Peak and Las Flores Canyon where the Palisades Fire burned, and blue elsewhere.

@@ -172,6 +172,12 @@ def main() -> None:
         "originals for LinkedIn and the portfolio. The GIFs are already under",
         "the cap and are posted as-is.",
         "",
+        "Eight of these files (before_after, hero_severity, palisades_char,",
+        "char_fraction, structures, water_content, and both GIFs) carry an Esri",
+        "World Imagery basemap, credited in-image and used under the Esri",
+        "Master Agreement §3.2(b). See README.md for the full imagery/data",
+        "credits.",
+        "",
     ]
     for fig in figures + animations:
         lines += [f"## {fig.name}", "", ALT_TEXT[fig.name], ""]

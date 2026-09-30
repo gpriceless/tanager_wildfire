@@ -32,7 +32,26 @@ SUBTITLE_COLOR = "#9a9ab5"
 ACCENT = "#ff5a5f"
 CREDIT_COLOR = "#5a5a75"
 
-CREDIT = "Planet Tanager-1 · CAL FIRE DINS · Esri imagery · github.com/gpriceless/tanager_wildfire"
+# Esri's required credit string for the World Imagery layer (item
+# 10df2279f9684e4a9f6a7f08febac2a9, ``accessInformation``), used under Esri
+# Master Agreement E204 §3.2(b). Only a figure that actually draws the
+# basemap may carry it — see credit_text().
+ESRI_CREDIT = (
+    "Basemap: Esri World Imagery — Esri, Vantor, Earthstar Geographics, "
+    "and the GIS User Community"
+)
+DINS_CREDIT = "CAL FIRE DINS"
+REPO_URL = "github.com/gpriceless/tanager_wildfire"
+
+
+def credit_text(*, basemap: bool = False, dins: bool = False) -> str:
+    """Per-figure credit line naming only the sources that figure draws."""
+    parts = ["Planet Tanager-1"]
+    if dins:
+        parts.append(DINS_CREDIT)
+    parts.append(REPO_URL)
+    line = " · ".join(parts)
+    return f"{ESRI_CREDIT}\n{line}" if basemap else line
 
 _to_utm = Transformer.from_crs("EPSG:4326", CRS, always_xy=True)
 _to_wgs = Transformer.from_crs(CRS, "EPSG:4326", always_xy=True)
@@ -377,11 +396,26 @@ def headline(
         )
 
 
-def credit(ax, right: bool = True, text: str | None = None) -> None:
+def credit(
+    ax,
+    right: bool = True,
+    text: str | None = None,
+    *,
+    basemap: bool = False,
+    dins: bool = False,
+) -> None:
+    """Draw the per-figure credit line.
+
+    ``basemap`` and ``dins`` name only the sources that figure actually
+    draws — pass them, don't pass a literal ``text``, unless the figure has
+    no basemap/DINS layer and needs a fully custom line.
+    """
     ha = "right" if right else "left"
     x = 0.985 if right else 0.015
     ax.text(
-        x, 0.014, text or CREDIT, transform=ax.transAxes, fontsize=7,
+        x, 0.014,
+        text if text is not None else credit_text(basemap=basemap, dins=dins),
+        transform=ax.transAxes, fontsize=7, linespacing=1.5,
         color=CREDIT_COLOR, ha=ha, va="bottom", zorder=25,
     )
 

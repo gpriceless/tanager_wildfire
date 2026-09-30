@@ -116,7 +116,7 @@ def fig_before_after() -> None:
         (0.4985, 0.02), 0.003, 0.93, transform=fig.transFigure,
         facecolor="#ffffff", zorder=15,
     ))
-    sb.credit(ax2)
+    sb.credit(ax2, basemap=True)
     fig.tight_layout(pad=0.7, rect=[0, 0, 1, 0.955])
     print("      ->", sb.save(fig, "before_after.png"))
     plt.close(fig)
@@ -184,7 +184,7 @@ def fig_hero_severity() -> None:
         bbox_to_anchor=(0.018, 0.775),  # just under the headline plate
     )
 
-    sb.credit(ax)
+    sb.credit(ax, basemap=True, dins=True)
     fig.tight_layout(pad=0.5)
     print("      ->", sb.save(fig, "hero_severity.png"))
     plt.close(fig)
@@ -250,7 +250,7 @@ def fig_palisades_char() -> None:
             zorder=10, style="italic",
             path_effects=[pe.withStroke(linewidth=2.6, foreground="#000000dd")])
 
-    sb.credit(ax)
+    sb.credit(ax, basemap=True)
     fig.tight_layout(pad=0.5)
     print("      ->", sb.save(fig, "palisades_char.png"))
     plt.close(fig)
@@ -305,7 +305,7 @@ def fig_char_fraction() -> None:
             transform=ax.transAxes, fontsize=9, color="#7a7a99", va="bottom",
             zorder=10, style="italic")
 
-    sb.credit(ax)
+    sb.credit(ax, basemap=True)
     fig.tight_layout(pad=0.5)
     print("      ->", sb.save(fig, "char_fraction.png"))
     plt.close(fig)
@@ -610,8 +610,8 @@ def fig_composites() -> None:
              "Each panel is built from 3 of Tanager-1's 426 bands. "
              "Same pixels, same second — only the wavelengths change.",
              ha="center", fontsize=11.5, color=sb.SUBTITLE_COLOR, va="top")
-    fig.text(0.985, 0.012, sb.CREDIT, ha="right", va="bottom", fontsize=7.5,
-             color=sb.CREDIT_COLOR)
+    fig.text(0.985, 0.012, sb.credit_text(), ha="right", va="bottom",
+             fontsize=7.5, color=sb.CREDIT_COLOR)
     fig.tight_layout(pad=1.2, rect=[0, 0.075, 1, 0.91])
     print("      ->", sb.save(fig, "composites.png"))
     plt.close(fig)
@@ -734,7 +734,7 @@ def fig_structures() -> None:
         color=sb.SUBTITLE_COLOR, linespacing=1.5,
     )
 
-    sb.credit(axm)
+    sb.credit(axm, basemap=True, dins=True)
     fig.tight_layout(pad=1.2, rect=[0, 0.04, 1, 1])
     print("      ->", sb.save(fig, "structures.png"))
     plt.close(fig)
@@ -857,7 +857,7 @@ def fig_water_content() -> None:
             transform=ax.transAxes, fontsize=9, color="#7a7a99", va="bottom",
             zorder=10, style="italic")
 
-    sb.credit(ax)
+    sb.credit(ax, basemap=True)
     fig.tight_layout(pad=0.5)
     print("      ->", sb.save(fig, "water_content.png"))
     plt.close(fig)
