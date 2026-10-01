@@ -746,66 +746,112 @@ def fig_structures() -> None:
 # ---------------------------------------------------------------------------
 
 def fig_sensor_comparison() -> None:
+    """Simulated sensors: char extent against the perimeter, absorption depths.
+
+    Every number is read from the outputs of ``scripts/sensor_comparison_usgs.py``
+    (USGS splib07a library, Tanager-1 resampled to each sensor's bands). The
+    earlier version of this figure plotted char R² against native Tanager from
+    image-derived endmembers (0.991 / 0.957 / 0.361); those values moved with
+    the library and are no longer published.
+    """
+    import pandas as pd
+
     print("  [8] Sensor comparison ...")
-    sensors = [
-        ("Tanager-1", 426, 1.000, "#ff5a5f"),
-        ("EMIT", 285, 0.991, "#f0a860"),
-        ("PRISMA", 239, 0.957, "#f0c419"),
-        ("Sentinel-2", 10, 0.361, "#5aa9e6"),
+    referents = pd.read_csv(sb.OUTPUTS / "sensor_comparison_usgs_referents.csv",
+                            index_col="sensor")
+    free = pd.read_csv(sb.OUTPUTS / "sensor_comparison_usgs_endmember_free.csv")
+    free = free[free["demand"] == "absorption"]
+
+    sensors = [  # (label in the CSVs, display name, bands, colour)
+        ("Native", "Tanager-1", 426, "#ff5a5f"),
+        ("EMIT", "EMIT", 285, "#f0a860"),
+        ("PRISMA", "PRISMA", 239, "#f0c419"),
+        ("Sentinel-2", "Sentinel-2", 10, "#5aa9e6"),
     ]
-
-    fig, ax = plt.subplots(figsize=(13, 7), dpi=200)
-    sb.style_dark(fig, ax)
-
-    names = [s[0] for s in sensors]
-    vals = [s[2] for s in sensors]
-    bands = [s[1] for s in sensors]
-    colors = [s[3] for s in sensors]
+    features = ["CR 970 nm", "CR 1200 nm", "CR 1700 nm", "CR 2100 nm"]
+    markers = ["o", "s", "D", "^"]
     ypos = np.arange(len(sensors))[::-1]
 
-    ax.barh(ypos, vals, height=0.58, color=colors, alpha=0.9, zorder=3,
-            edgecolor="none")
-    for y, name, v, b, c in zip(ypos, names, vals, bands, colors):
-        ax.text(v + 0.014, y, f"{v:.3f}", va="center", ha="left",
-                fontsize=13, fontweight="bold", color=c, zorder=5)
-        ax.text(-0.015, y + 0.20, name, va="center", ha="right", fontsize=13.5,
-                fontweight="bold", color=sb.TEXT_COLOR, zorder=5)
-        ax.text(-0.015, y - 0.20, f"{b} bands", va="center", ha="right",
-                fontsize=10, color=sb.SUBTITLE_COLOR, zorder=5)
-
-    ax.annotate(
-        "", xy=(0.361, ypos[-1] - 0.42), xytext=(0.991, ypos[-1] - 0.42),
-        arrowprops=dict(arrowstyle="<|-|>", color=sb.ACCENT, lw=1.6), zorder=6,
+    fig, (ax_auc, ax_r2) = plt.subplots(
+        1, 2, figsize=(13, 7.4), dpi=200, sharey=True,
+        gridspec_kw=dict(width_ratios=[1, 1.25], wspace=0.08),
     )
-    ax.text(0.676, ypos[-1] - 0.62,
-            "the gap 416 extra bands buy you",
-            ha="center", va="top", fontsize=11.5, color=sb.ACCENT,
-            fontweight="bold", zorder=6)
+    sb.style_dark(fig, [ax_auc, ax_r2])
 
-    ax.set_xlim(0, 1.13)
-    ax.set_ylim(ypos[-1] - 1.15, ypos[0] + 0.62)
-    ax.set_yticks([])
-    ax.set_xticks([0, 0.25, 0.5, 0.75, 1.0])
-    ax.set_xticklabels(["0", "0.25", "0.50", "0.75", "1.00"], fontsize=10)
-    ax.set_xlabel(
-        "Agreement with Tanager-1 char fraction  (R², same pixels, same day)",
-        fontsize=11.5, color=sb.SUBTITLE_COLOR,
+    # Left: char fraction against the official Palisades perimeter.
+    for y, (key, _, _, c) in zip(ypos, sensors):
+        v = float(referents.loc[key, "perimeter_auc"])
+        ax_auc.hlines(y, 0.5, v, color=c, lw=2.2, alpha=0.55, zorder=3)
+        ax_auc.scatter(v, y, s=150, color=c, zorder=4, edgecolor="none")
+        ax_auc.text(v + 0.022, y, f"{v:.3f}", va="center", ha="left",
+                    fontsize=13, fontweight="bold", color=c, zorder=5)
+    ax_auc.set_xlim(0.5, 1.0)
+    ax_auc.set_xticks([0.5, 0.6, 0.7, 0.8, 0.9, 1.0])
+    ax_auc.set_xticklabels(["0.5\nchance", "0.6", "0.7", "0.8", "0.9", "1.0"],
+                           fontsize=10)
+    ax_auc.set_title("Where it burned: char fraction vs the\nofficial "
+                     "Palisades perimeter (AUC)", fontsize=12.5,
+                     color=sb.TEXT_COLOR, loc="left", pad=10)
+
+    # Right: continuum-removed absorption depths, agreement with Tanager-1.
+    for y, (key, _, _, c) in zip(ypos, sensors):
+        if key == "Native":
+            ax_r2.text(0.0, y, "the reference: each sensor is scored against it",
+                       va="center", ha="center", fontsize=10.5, style="italic",
+                       color=sb.SUBTITLE_COLOR, zorder=5)
+            continue
+        rows = free[free["sensor"] == key].set_index("product")["r2"]
+        vals = [float(rows[f]) for f in features]
+        ax_r2.hlines(y, min(vals), max(vals), color=c, lw=1.4, alpha=0.5, zorder=3)
+        for v, m in zip(vals, markers):
+            ax_r2.scatter(v, y, s=80, marker=m, color=c, zorder=4, edgecolor="none")
+        lo = min(vals)
+        ax_r2.text(lo - 0.05, y, f"{lo:.2f}", va="center", ha="right",
+                   fontsize=11, color=c, zorder=5)
+    ax_r2.axvline(0.0, color="#8a8aa8", lw=1.0, ls="--", zorder=2)
+    ax_r2.text(-0.04, (ypos[0] + ypos[1]) / 2, "below 0: worse than\nguessing the average",
+               fontsize=9, color=sb.SUBTITLE_COLOR, va="center", ha="right")
+    ax_r2.set_xlim(-1.35, 1.08)
+    ax_r2.set_xticks([-1.0, -0.5, 0.0, 0.5, 1.0])
+    ax_r2.set_xticklabels(["-1.0", "-0.5", "0", "0.5", "1.0"], fontsize=10)
+    ax_r2.set_title("What it is made of: depth of four narrow\nabsorption "
+                    "features, agreement with Tanager-1 (R²)", fontsize=12.5,
+                    color=sb.TEXT_COLOR, loc="left", pad=10)
+    ax_r2.legend(
+        handles=[Line2D([0], [0], marker=m, color="none", markerfacecolor="#c8c8dc",
+                        markeredgecolor="none", markersize=7,
+                        label=f.replace("CR ", ""))
+                 for f, m in zip(features, markers)],
+        loc="lower left", bbox_to_anchor=(0.0, 0.0), ncol=4, frameon=False,
+        fontsize=9, labelcolor=sb.SUBTITLE_COLOR, handletextpad=0.2,
+        columnspacing=0.9,
     )
-    ax.grid(True, axis="x", alpha=0.12, color="#555577", zorder=0)
-    for s in ("top", "right", "left"):
-        ax.spines[s].set_visible(False)
 
-    fig.text(0.5, 0.99,
-             "Resample Tanager-1 down to each sensor, then try to map char again",
-             ha="center", fontsize=17, fontweight="bold",
+    for ax in (ax_auc, ax_r2):
+        ax.set_ylim(ypos[-1] - 0.9, ypos[0] + 0.5)
+        ax.grid(True, axis="x", alpha=0.12, color="#555577", zorder=0)
+        for side in ("top", "right", "left"):
+            ax.spines[side].set_visible(False)
+        ax.tick_params(axis="y", length=0)
+    ax_auc.set_yticks(ypos)
+    ax_auc.set_yticklabels([f"{name}\n{b} bands" for _, name, b, _ in sensors],
+                           fontsize=12, color=sb.TEXT_COLOR)
+
+    fig.text(0.5, 0.995,
+             "More bands did not map the burn better. They did resolve what it is made of.",
+             ha="center", fontsize=16.5, fontweight="bold",
              color=sb.TEXT_COLOR, va="top")
-    fig.text(0.5, 0.935,
-             "Sentinel-2's 10 broad bands recover about a third of the sub-pixel "
-             "burn signal. The other hyperspectral sensors recover nearly all of it.",
-             ha="center", fontsize=11.5, color=sb.SUBTITLE_COLOR, va="top")
+    fig.text(0.5, 0.945,
+             "Simulated sensors: the same Tanager-1 pixels, same day, resampled to "
+             "each sensor's bands. Real sensors also differ in\npixel size, noise and "
+             "date. Left: full Palisades swath. Right: a 128 × 128-pixel crop; R² "
+             "measures agreement with Tanager-1, not accuracy.",
+             ha="center", fontsize=10.5, color=sb.SUBTITLE_COLOR, va="top",
+             linespacing=1.45)
 
-    sb.credit(ax, right=True)
-    fig.tight_layout(pad=1.0, rect=[0, 0, 1, 0.90])
+    fig.text(0.98, 0.01, sb.credit_text(), fontsize=7, color=sb.CREDIT_COLOR,
+             ha="right", va="bottom")
+    fig.subplots_adjust(left=0.13, right=0.98, top=0.80, bottom=0.12)
     print("      ->", sb.save(fig, "sensor_comparison.png"))
     plt.close(fig)
 

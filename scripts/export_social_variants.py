@@ -98,12 +98,18 @@ ALT_TEXT: dict[str, str] = {
         "0.23, with the two distributions clearly overlapping."
     ),
     "sensor_comparison.png": (
-        "Horizontal bar chart. Agreement with Tanager-1's char fraction map "
-        "after resampling the same pixels down to each sensor's bands: "
-        "Tanager-1 with 426 bands scores 1.000, EMIT with 285 bands 0.991, "
-        "PRISMA with 239 bands 0.957, and Sentinel-2 with 10 bands only 0.361. "
-        "An arrow spans the gap between Sentinel-2 and the hyperspectral "
-        "sensors."
+        "Two-panel dot chart comparing four satellite sensors, simulated by "
+        "resampling the same Tanager-1 pixels to each sensor's bands. Left, how "
+        "well a char-fraction map separates the inside of the official "
+        "Palisades Fire perimeter from the outside, as AUC where 0.5 is chance: "
+        "Tanager-1 with 426 bands 0.795, EMIT with 285 bands 0.795, PRISMA with "
+        "239 bands 0.793 and Sentinel-2 with 10 bands 0.807, all close "
+        "together. Right, how closely each sensor reproduces Tanager-1's depth "
+        "of four narrow absorption features at 970, 1200, 1700 and 2100 "
+        "nanometres, as R²: EMIT 0.95 to 0.99, PRISMA 0.86 to 0.96, and "
+        "Sentinel-2 between −1.05 and −0.35, worse than guessing the "
+        "average. The headline reads: more bands did not map the burn better; "
+        "they did resolve what it is made of."
     ),
     "palisades_before_after.gif": (
         "Two-frame animation of the Santa Monica Mountains that cuts between 15 "
