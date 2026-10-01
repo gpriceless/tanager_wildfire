@@ -76,6 +76,11 @@ def main() -> int:
     rows.append(("dNBR median outside, Palisades only", "0.046",
                  f"{np.median(v[~pal & fin]):.3f}",
                  "land outside Palisades; includes the Franklin scar"))
+    pal_in, pal_out = v[pal & fin], v[~any_fire & fin]
+    rows.append(("dNBR perimeter AUC", "0.970", f"{auc(pal_in, pal_out):.3f}",
+                 f"inside Palisades vs outside every perimeter, land pixels, "
+                 f"n={pal_in.size}/{pal_out.size}; dNBR covers a narrower footprint than "
+                 f"char, so the pixel sets differ from the char perimeter AUC"))
     for name in ("FRANKLIN", "KENNETH"):
         m = grid_mask(dnbr, perims[names == name])
         val = f"{np.median(v[m & fin]):.3f}" if (m & fin).any() else "not in dNBR footprint"
@@ -215,7 +220,13 @@ def main() -> int:
         *[f"| {a} | {b} | {c} | {d} |" for a, b, c, d in rows],
         "",
     ]
-    args.out.write_text("\n".join(lines))
+    # Keep the hand-written notes below the table across regenerations.
+    notes = ""
+    if args.out.exists():
+        old = args.out.read_text()
+        if "## Notes" in old:
+            notes = old[old.index("## Notes"):]
+    args.out.write_text("\n".join(lines) + notes)
     print("\n".join(lines))
     return 0
 

@@ -1,12 +1,13 @@
 # Published numbers, recomputed
 
-Generated 2026-10-01T03:33:21Z by scripts/verify_published_numbers.py. Commit: 5ce3630
+Generated 2026-10-01T03:54:37Z by scripts/verify_published_numbers.py. Commit: cb53bf8
 
 | Claim | Published | Recomputed | Definition |
 |---|---|---|---|
 | dNBR median inside Palisades | 0.588 | 0.588 | land pixels inside the WFIGS perimeter, n=32915 |
 | dNBR median outside, all perimeters | 0.060 | 0.060 | land outside Palisades, Franklin and Kenneth |
 | dNBR median outside, Palisades only | 0.046 | 0.046 | land outside Palisades; includes the Franklin scar |
+| dNBR perimeter AUC | 0.970 | 0.970 | inside Palisades vs outside every perimeter, land pixels, n=32915/73196; dNBR covers a narrower footprint than char, so the pixel sets differ from the char perimeter AUC |
 | dNBR median inside Franklin | - | -0.007 | 18853 land pixels |
 | dNBR median inside Kenneth | - | not in dNBR footprint | 0 land pixels |
 | char median inside / outside Palisades | 0.389 / 0.000 | 0.389 / 0.000 | outside = outside every perimeter in the reference file |
