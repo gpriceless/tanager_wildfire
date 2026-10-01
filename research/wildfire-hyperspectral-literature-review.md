@@ -116,7 +116,7 @@ Dry matter absorption features (important for decomposing LFMC signal):
 
 **Yebra et al. (2013)** — *Remote Sensing of Environment* (global review). Synthesized LFMC retrieval methods across sensor types and geographic regions. Definitive finding: wavelength regions at 970nm, 1200nm, 1450nm, and 1940nm are universally most informative for LFMC. Accuracy requirements for operational fire danger applications: RMSE < 25% FMC at the landscape scale. This sets the target for FireSpec: we should aim for RMSE < 20% FMC to demonstrate clear improvement over multispectral baselines.
 
-**Marino et al. (2022)** — *Remote Sensing*, 14(13). Applied Random Forest regression to MODIS multispectral data for landscape-scale LFMC estimation. Results: RMSE=16–20% FMC. This represents the operational multispectral baseline that FireSpec's Tanager-based PLSR must beat. Given Tanager's spectral resolution (426 bands vs. MODIS's 7 VNIR/SWIR bands), surpassing this baseline is highly feasible.
+**Marino et al. (2020)** — *Remote Sensing*, 12(14), 2251. Estimated LFMC of *Cistus ladanifer*, an indicator shrub, at one monospecific site near Madrid, from Sentinel-2 and MODIS (MCD43A4, MOD09GA) spectral indices and from radiative transfer model inversion of MCD43A4. Empirical models validated at R² 0.72–0.75 (MAE 11–13%); the RTM-derived LFMC was weaker (R² 0.49 pooled, 0.56–0.85 per year, MAE 25–38% per year). The open-shrubland RTM failure sometimes attributed to this group is Lai, Quan, Yebra & He (2022), *GIScience & Remote Sensing* 59(1): RTMs retrieved closed-shrubland LFMC at R² 0.60–0.66 but failed on open shrublands (R² 0.01–0.09, RMSE 45–49%).
 
 ---
 
@@ -246,4 +246,5 @@ The following band regions must be masked prior to all analyses due to atmospher
 
 12. Yebra, M., Dennison, P.E., Chuvieco, E., Riano, D., Zylstra, P., Hunt, E.R., ... & Danson, M. (2013). A global review of remote sensing of live fuel moisture content for fire danger assessment: Moving towards operational products. *Remote Sensing of Environment*, 136, 455–468.
 
-13. Marino, E., Yebra, M., Guillén-Climent, M., Algeet, N., Tomé, J.L., Madrigal, J., ... & Guijarro, M. (2022). Investigating live fuel moisture content estimation in fire-prone shrubland from remote sensing using empirical relationships and uncoupled modelling. *Remote Sensing*, 14(13), 3203. https://doi.org/10.3390/rs14133203
+13. Marino, E., Yebra, M., Guillén-Climent, M., Algeet, N., Tomé, J.L., Madrigal, J., ... (2020). Investigating live fuel moisture content estimation in fire-prone shrubland from remote sensing using empirical modelling and RTM simulations. *Remote Sensing*, 12(14), 2251. https://doi.org/10.3390/rs12142251
+    Lai, G., Quan, X., Yebra, M., & He, B. (2022). Model-driven estimation of closed and open shrublands live fuel moisture content. *GIScience & Remote Sensing*, 59(1). https://doi.org/10.1080/15481603.2022.2139404
