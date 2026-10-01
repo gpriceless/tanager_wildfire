@@ -54,7 +54,7 @@ Map of canopy water content across north Los Angeles County on 7 April 2025, fro
 
 ## hughes_recovery.gif
 
-Two-frame animation of the Hughes Fire footprint near Castaic Lake that cuts between 23 January 2025 and 7 April 2025. The first frame is mostly bare brown burned ground. Seventy-four days later the same hills are broadly green, showing vegetation that has regrown, with mean Normalized Burn Ratio rising from 0.017 to 0.192.
+Two-frame animation of the Hughes Fire near Castaic Lake that cuts between 23 January 2025 and 7 April 2025, with the official fire perimeter drawn as a pale yellow outline. In January the ground inside the outline is dark brown where it burned, and the hills outside it are tan and dry. Seventy-four days later the hills outside the outline have turned green with the season, while the burned ground inside it is still mostly brown with a few patches of green. The April image covers only the western third of the fire. On the pixels both images cover, mean Normalized Burn Ratio inside the outline rises from −0.330 to −0.012, and on unburned land outside it from 0.042 to 0.233.
 
 ## palisades_before_after.gif
 

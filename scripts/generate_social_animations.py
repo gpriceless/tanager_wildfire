@@ -52,9 +52,12 @@ NBR_CMAP = sb._cmap(
 NBR_VMIN, NBR_VMAX = -0.35, 0.65
 
 # The Jan/Apr overlap is a 10 x 22 km strip, too tall for a landscape canvas.
-# Cropped to a 4:5-ish window centred on the recovering burn (centroid
-# 349935, 3820305) and rendered portrait, which also suits the feed.
-HUGHES_FRAME = dict(xmin=345150, xmax=355400, ymin=3813800, ymax=3826800)
+# Cropped to a 4:5-ish window over the recovering burn and rendered portrait,
+# which also suits the feed. The window contains every perimeter pixel that
+# both scenes cover (y 3817185-3827175), so the footnote means describe only
+# pixels that are on screen.
+HUGHES_FRAME = dict(xmin=345150, xmax=355400, ymin=3814500, ymax=3827500)
+HUGHES_PERIMETER = Path("data/reference/perimeters/hughes_2025.geojson")
 
 
 def ensure_swath2_nbr() -> None:
@@ -84,7 +87,7 @@ def ensure_swath2_nbr() -> None:
 def _frame(
     data, extent, frame, date_label, caption, title, perimeter, place_labels,
     scale_km, footnote, figsize=(11, 7.4), headline_width=0.56,
-    date_size=26,
+    date_size=26, footnote_xy=(0.975, 0.895), footnote_ha="right",
 ):
     fig, ax = plt.subplots(figsize=figsize, dpi=130)
     sb.style_dark(fig, ax)
@@ -98,8 +101,10 @@ def _frame(
     ax.set_xlim(frame["xmin"], frame["xmax"])
     ax.set_ylim(frame["ymin"], frame["ymax"])
 
-    if perimeter:
+    if isinstance(perimeter, str):
         sb.overlay_perimeter(ax, perimeter, color="#ffe9a8", linewidth=1.6)
+    elif perimeter is not None:
+        perimeter.boundary.plot(ax=ax, color="#ffe9a8", linewidth=1.6, zorder=15)
 
     ax.set_xticks([])
     ax.set_yticks([])
@@ -118,8 +123,8 @@ def _frame(
         path_effects=[pe.withStroke(linewidth=4.5, foreground="#000000cc")],
     )
     ax.text(
-        0.975, 0.895, footnote, transform=ax.transAxes, ha="right", va="top",
-        fontsize=11, color="#ffe9a8", zorder=24,
+        *footnote_xy, footnote, transform=ax.transAxes, ha=footnote_ha, va="top",
+        fontsize=11, color="#ffe9a8", zorder=24, linespacing=1.4,
         path_effects=[pe.withStroke(linewidth=3.0, foreground="#000000cc")],
     )
 
@@ -184,27 +189,81 @@ def palisades_gif() -> None:
     write_gif(frames, sb.SOCIAL / "palisades_before_after.gif", [2200, 2200])
 
 
+def hughes_means(jan, apr, perimeter, frame) -> dict:
+    """Mean NBR inside and outside the WFIGS Hughes perimeter.
+
+    Only pixels both scenes cover. "Inside" is the whole perimeter, all of
+    which falls in *frame*; "outside" is the unburned land drawn in *frame*,
+    the seasonal control for the inside change. Same definitions as the
+    Hughes rows of ``outputs/published_numbers_check.md``.
+    """
+    from rasterio.features import geometry_mask
+    from rasterio.transform import from_origin
+
+    x, y = jan.x.values, jan.y.values
+    rx, ry = abs(x[1] - x[0]), abs(y[1] - y[0])
+    transform = from_origin(x[0] - rx / 2, y[0] + ry / 2, rx, ry)
+    inside = ~geometry_mask(perimeter.geometry, out_shape=(y.size, x.size),
+                            transform=transform)
+    both = np.isfinite(jan.values) & np.isfinite(apr.values)
+    xx, yy = np.meshgrid(x, y)
+    in_frame = ((xx >= frame["xmin"]) & (xx <= frame["xmax"])
+                & (yy >= frame["ymin"]) & (yy <= frame["ymax"]))
+    ins, out = inside & both, ~inside & both & in_frame
+    if (ins & ~in_frame).any():
+        raise SystemExit("Hughes frame no longer contains every perimeter pixel.")
+    return dict(
+        jan_in=float(jan.values[ins].mean()), apr_in=float(apr.values[ins].mean()),
+        jan_out=float(jan.values[out].mean()), apr_out=float(apr.values[out].mean()),
+        n_in=int(ins.sum()), n_perimeter=int(inside.sum()), n_out=int(out.sum()),
+    )
+
+
+def _signed(v: float) -> str:
+    return f"{v:.3f}".replace("-", "\u2212")
+
+
 def hughes_gif() -> None:
+    import geopandas as gpd
+
     print("  [2] Hughes: burned -> recovering ...")
     jan = sb.load("20250123_nbr.tif")
     apr = sb.load("20250407_nbr.tif").rio.reproject_match(jan)
-
+    perimeter = gpd.read_file(HUGHES_PERIMETER).to_crs(sb.CRS)
     f = HUGHES_FRAME
+    m = hughes_means(jan, apr, perimeter, f)
+    share = 100.0 * m["n_in"] / m["n_perimeter"]
+    print(f"      mean NBR inside perimeter {m['jan_in']:.3f} -> {m['apr_in']:.3f}, "
+          f"n={m['n_in']} of {m['n_perimeter']} ({share:.0f}%); outside in frame "
+          f"{m['jan_out']:.3f} -> {m['apr_out']:.3f}, n={m['n_out']}")
+
     ext = [f["xmin"], f["xmax"], f["ymin"], f["ymax"]]
     jan_c = jan.sel(x=slice(f["xmin"], f["xmax"]), y=slice(f["ymax"], f["ymin"]))
     apr_c = apr.sel(x=slice(f["xmin"], f["xmax"]), y=slice(f["ymax"], f["ymin"]))
 
+    # The unburned land greens with the season too, so the outside mean
+    # travels with the inside one; so does the share of the fire the April
+    # scene covers.
+    def footnote(inside: float, outside: float) -> str:
+        return (f"mean NBR inside the outline: {_signed(inside)}\n"
+                f"on unburned land outside it: {_signed(outside)}\n"
+                f"(pixels both scenes cover: {share:.0f}% of the fire's area)")
+
+    common = dict(figsize=(8.2, 10.2), headline_width=0.70, date_size=21,
+                  footnote_xy=(0.035, 0.835), footnote_ha="left")
     frames = [
         _frame(jan_c.values, ext, f, "23 Jan 2025",
-               "The Hughes Fire near Castaic, one day after\n"
-               "the fire was stopped. Brown is bare ground.",
-               "Burned", None, True, 3, "mean NBR 0.017",
-               figsize=(8.2, 10.2), headline_width=0.70, date_size=21),
+               "The Hughes Fire near Castaic, the day after\n"
+               "it started. Inside the outline the ground is\n"
+               "burned; outside it, the hills are winter-dry.",
+               "Burned", perimeter, True, 3,
+               footnote(m["jan_in"], m["jan_out"]), **common),
         _frame(apr_c.values, ext, f, "7 Apr 2025",
-               "Seventy-four days later, after a wet spring.\n"
-               "Green is vegetation grown back since the fire.",
-               "Recovering", None, True, 3, "mean NBR 0.192",
-               figsize=(8.2, 10.2), headline_width=0.70, date_size=21),
+               "Seventy-four days later. The unburned hills\n"
+               "have greened with the season; inside the\n"
+               "outline, the burn has only started to.",
+               "Starting to recover", perimeter, True, 3,
+               footnote(m["apr_in"], m["apr_out"]), **common),
     ]
     write_gif(frames, sb.SOCIAL / "hughes_recovery.gif", [2200, 2200])
 

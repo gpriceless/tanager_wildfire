@@ -1,12 +1,12 @@
 # Published numbers, recomputed
 
-Generated 2026-10-01T03:54:37Z by scripts/verify_published_numbers.py. Commit: cb53bf8
+Generated 2026-10-01T04:04:25Z by scripts/verify_published_numbers.py. Commit: c50b433
 
 | Claim | Published | Recomputed | Definition |
 |---|---|---|---|
 | dNBR median inside Palisades | 0.588 | 0.588 | land pixels inside the WFIGS perimeter, n=32915 |
 | dNBR median outside, all perimeters | 0.060 | 0.060 | land outside Palisades, Franklin and Kenneth |
-| dNBR median outside, Palisades only | 0.046 | 0.046 | land outside Palisades; includes the Franklin scar |
+| dNBR median outside, Palisades only | - (was 0.046) | 0.046 | land outside Palisades; includes the Franklin scar |
 | dNBR perimeter AUC | 0.970 | 0.970 | inside Palisades vs outside every perimeter, land pixels, n=32915/73196; dNBR covers a narrower footprint than char, so the pixel sets differ from the char perimeter AUC |
 | dNBR median inside Franklin | - | -0.007 | 18853 land pixels |
 | dNBR median inside Kenneth | - | not in dNBR footprint | 0 land pixels |
@@ -25,8 +25,9 @@ Generated 2026-10-01T03:54:37Z by scripts/verify_published_numbers.py. Commit: c
 | share of valid land pixels modelled | 85.4% | 85.4% | 322,304 of 377,590 pixels left by the nodata, cloud and water masks; 31.7% of the full grid |
 | structures in frame / destroyed | 2,046 / 984 | 2,046 / 984 | CAL FIRE DINS, hero-figure frame |
 | dNBR median destroyed / undamaged | 0.375 / 0.234 | 0.375 / 0.234 | in-frame points with dNBR, n=869/679 |
-| Hughes mean NBR Jan -> Apr | 0.017 -> 0.192 | -0.072 -> 0.205 | all finite pixels in the animation frame |
-| Hughes mean NBR Jan -> Apr, inside perimeter | - | -0.330 -> -0.012 | pixels inside WFIGS Hughes perimeter covered by both scenes, n=14877 of 46850 |
+| Hughes mean NBR Jan -> Apr, whole frame | - (was 0.017 -> 0.192) | -0.076 -> 0.208 | all finite pixels in the animation frame |
+| Hughes mean NBR Jan -> Apr, inside perimeter | -0.330 -> -0.012 | -0.330 -> -0.012 | pixels inside WFIGS Hughes perimeter covered by both scenes, n=14877 of 46850 |
+| Hughes mean NBR Jan -> Apr, outside perimeter | 0.042 -> 0.233 | 0.042 -> 0.233 | seasonal control: pixels outside the perimeter in the animation frame, covered by both scenes, n=61669 |
 ## Notes
 
 - **dNBR outside the perimeter.** Both published values are correct, for different
@@ -34,9 +35,15 @@ Generated 2026-10-01T03:54:37Z by scripts/verify_published_numbers.py. Commit: c
   the Palisades perimeter only, which counts the Franklin scar (median dNBR
   -0.007; it burned before the pre-fire scene) as unburned. The Kenneth perimeter
   lies outside the dNBR footprint and changes neither value.
-- **Hughes recovery** does not reproduce. Use the inside-perimeter row, which has
-  an external referent: the April scene covers 14,877 of the perimeter's 46,850
-  pixels.
+- **Hughes recovery.** The old 0.017 -> 0.192 was a typed literal with no
+  producing code and is retired. `hughes_recovery.gif` now computes its footnotes
+  from the arrays it draws, with the definitions of the two perimeter rows: inside
+  the WFIGS perimeter (the April scene covers 14,877 of its 46,850 pixels) and
+  unburned land outside it in the frame. The outside row is the seasonal control.
+  Unburned hills rose 0.191 over the same 74 days, so the inside rise of 0.318 is
+  not all regrowth.
+- **dNBR outside, Palisades only (0.046)** is no longer published. The hero
+  figure now quotes 0.060, outside every mapped perimeter.
 - **Wildland vs built-up.** The split has no committed definition. The direction
   holds at every threshold from 0 to 300 m (wildland median 0.43-0.50, AUC
   0.82-0.89; built-up median 0.000), so quote it with its threshold.

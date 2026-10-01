@@ -29,12 +29,12 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import social_base as sb  # noqa: E402
+from generate_social_animations import HUGHES_FRAME  # noqa: E402
 from palisades_common import OUTPUTS, PERIMETERS, point_indices, polygon_masks  # noqa: E402
 from validate_char_fractions import auc  # noqa: E402
 
 DNBR = "20241215_to_20250123swath2_dnbr.tif"
 CHAR = OUTPUTS / "20250123swath2_frac_char.tif"
-HUGHES_FRAME = dict(xmin=345150, xmax=355400, ymin=3813800, ymax=3826800)
 
 
 def grid_mask(da, frame) -> np.ndarray:
@@ -73,7 +73,7 @@ def main() -> int:
     rows.append(("dNBR median outside, all perimeters", "0.060",
                  f"{np.median(v[~any_fire & fin]):.3f}",
                  "land outside Palisades, Franklin and Kenneth"))
-    rows.append(("dNBR median outside, Palisades only", "0.046",
+    rows.append(("dNBR median outside, Palisades only", "- (was 0.046)",
                  f"{np.median(v[~pal & fin]):.3f}",
                  "land outside Palisades; includes the Franklin scar"))
     pal_in, pal_out = v[pal & fin], v[~any_fire & fin]
@@ -195,17 +195,25 @@ def main() -> int:
     sl = dict(x=slice(HUGHES_FRAME["xmin"], HUGHES_FRAME["xmax"]),
               y=slice(HUGHES_FRAME["ymax"], HUGHES_FRAME["ymin"]))
     j, a = jan.sel(**sl).values, apr.sel(**sl).values
-    rows.append(("Hughes mean NBR Jan -> Apr", "0.017 -> 0.192",
+    rows.append(("Hughes mean NBR Jan -> Apr, whole frame", "- (was 0.017 -> 0.192)",
                  f"{np.nanmean(j):.3f} -> {np.nanmean(a):.3f}",
                  "all finite pixels in the animation frame"))
     if args.hughes_perimeter.exists():
         hughes = gpd.read_file(args.hughes_perimeter).to_crs(sb.CRS)
         m = grid_mask(jan, hughes)
         both = m & np.isfinite(jan.values) & np.isfinite(apr.values)
-        rows.append(("Hughes mean NBR Jan -> Apr, inside perimeter", "-",
+        rows.append(("Hughes mean NBR Jan -> Apr, inside perimeter", "-0.330 -> -0.012",
                      f"{jan.values[both].mean():.3f} -> {apr.values[both].mean():.3f}",
                      f"pixels inside WFIGS Hughes perimeter covered by both scenes, "
                      f"n={int(both.sum())} of {int(m.sum())}"))
+        xx, yy = np.meshgrid(jan.x.values, jan.y.values)
+        in_frame = ((xx >= HUGHES_FRAME["xmin"]) & (xx <= HUGHES_FRAME["xmax"])
+                    & (yy >= HUGHES_FRAME["ymin"]) & (yy <= HUGHES_FRAME["ymax"]))
+        out = ~m & in_frame & np.isfinite(jan.values) & np.isfinite(apr.values)
+        rows.append(("Hughes mean NBR Jan -> Apr, outside perimeter", "0.042 -> 0.233",
+                     f"{jan.values[out].mean():.3f} -> {apr.values[out].mean():.3f}",
+                     f"seasonal control: pixels outside the perimeter in the animation "
+                     f"frame, covered by both scenes, n={int(out.sum())}"))
 
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO_ROOT,
                             capture_output=True, text=True).stdout.strip()
