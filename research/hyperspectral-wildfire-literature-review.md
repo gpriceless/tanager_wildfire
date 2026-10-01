@@ -74,7 +74,7 @@ Standard fire MESMA endmember library:
 | Optimal dNBR-NIR | 962 nm | — | Best dNBR NIR band (van Gerrevink 2021) |
 | Water-2 | 1200 nm | O-H combination | LFMC |
 | NPV / Cellulose | 1700 nm | C-H stretch | NPV discrimination, LFMC |
-| Cellulose | 2100 nm | C-O stretch | CAI (R^2 = 0.808), dry matter |
+| Cellulose | 2100 nm | C-O stretch | CAI (fire severity CV-R^2 up to 0.80, P18), dry matter |
 | Clay minerals | 2200 nm | Al-OH | Post-fire soil mineralogy |
 | Optimal dNBR-SWIR | 2246 nm | — | Best dNBR SWIR band (van Gerrevink 2021) |
 
@@ -146,7 +146,7 @@ Standard fire MESMA endmember library:
 ### What Benefits Most from 426 Bands
 
 1. **MESMA / SMA** — The biggest beneficiary. R^2 improvement: 0.86 vs 0.52 (65% relative).
-2. **Cellulose Absorption Index** — CAI requires precise 2100nm measurement. R^2 = 0.808 from PRISMA (Quintano 2023).
+2. **Cellulose Absorption Index** — CAI requires precise 2100nm measurement. With PRISMA on the Sierra de la Culebra fire, CAI was the best hyperspectral index against CBI in broadleaf forests (CV-R^2 = 0.68-0.73) and shrublands (CV-R^2 = 0.75-0.80), but not in coniferous forests, where DVIRED and EVI did better (Cipra-Rodriguez 2026, P18).
 3. **LFMC estimation** — Water absorption depth measurement at 970nm, 1200nm, 1700nm.
 4. **Post-fire mineral characterization** — Heated soils produce diagnostic iron oxide/clay mineral transformations.
 5. **Vegetation recovery** — Red-edge position benefits from 5nm sampling in 680-750nm.
@@ -265,7 +265,7 @@ No published spaceborne hyperspectral multi-temporal MESMA fire study exists. Th
 
 | ID | Citation | Relevance |
 |----|----------|-----------|
-| P1 | Quintano, C. et al. (2023). First evaluation of fire severity retrieval from PRISMA. *RSE*, 113670. | Critical |
+| P1 | Quintano, C. et al. (2023). First evaluation of fire severity retrieval from PRISMA hyperspectral data. *RSE*, 295, 113670. doi:10.1016/j.rse.2023.113670 | Critical |
 | P2 | Quintano, C. & Fernandez-Manso, A. (2023/24). MESMA PRISMA fire severity. *Proc. SPIE 12688*. | Critical |
 | P3 | Veraverbeke, S. et al. (2014). Assessing fire severity using AVIRIS. *RSE*, 154, 153-163. | Critical |
 | P4 | Quintano, C. et al. (2013). MESMA burn severity from Landsat. *RSE*. | Important |
@@ -282,3 +282,4 @@ No published spaceborne hyperspectral multi-temporal MESMA fire study exists. Th
 | P15 | Yebra, M. et al. (2024). Globe-LFMC 2.0. *Scientific Data*. | Critical |
 | P16 | Robichaud, P. et al. (2007). Postfire soil burn severity with hyperspectral unmixing. *RSE*. | Useful |
 | P17 | Howe, A. et al. (2022). Sentinel-2 vs Landsat burn severity. *Remote Sensing*, 14(20), 5249. | Important |
+| P18 | Cipra-Rodriguez, J.A., Fernández-Guisuraga, J.M. & Quintano, C. (2026). Comparative assessment of hyperspectral and multispectral vegetation indices for estimating fire severity in Mediterranean ecosystems. *Remote Sensing*, 18(2), 244. doi:10.3390/rs18020244 | Important |
