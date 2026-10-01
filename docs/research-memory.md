@@ -144,7 +144,7 @@ After masking: **~330-346 usable bands** remain. Adaptive per-scene SNR filterin
 
 | Paper | Year | Sensor | Key Finding | Relevance |
 |-------|------|--------|-------------|-----------|
-| Quintano et al. | 2023 | PRISMA | First spaceborne hyperspectral fire severity. MESMA R2=0.64-0.79 vs CBI; Sentinel-2 only R2=0.27-0.53. ~2x improvement. | **Critical** -- validates our approach; PRISMA is closest Tanager analog |
+| Quintano et al. | 2023 | PRISMA | First spaceborne hyperspectral fire severity (RSE 295, 113670; Quintano, Calvo, Fernández-Manso, Suárez-Seoane, Fernandes, Fernández-Guisuraga). MESMA char/PV/NPVS fractions from both PRISMA and Sentinel-2, regressed on field CBI (vegetation, soil, site) with Random Forest: PRISMA R2=0.64-0.79, Sentinel-2 R2=0.27-0.53. Values from the abstract; full text not read. | **Critical** -- validates our approach; PRISMA is closest Tanager analog |
 | Roberts et al. | 2018 | AVIRIS | IES + uSZU band selection for post-fire MESMA. r2=0.74 (ash), 0.84 (GV) vs WorldView-2. | **High** -- endmember selection methodology (In-CoB + uSZU) |
 | Veraverbeke et al. | 2018 | Review | Comprehensive hyperspectral fire RS review. VSWIR is primary domain. | **High** -- authoritative review framing our approach |
 | Veraverbeke et al. | 2014 | AVIRIS | Burned fraction vs GeoCBI R2=0.86. Significantly better than Landsat. | **High** -- upper bound for severity accuracy |

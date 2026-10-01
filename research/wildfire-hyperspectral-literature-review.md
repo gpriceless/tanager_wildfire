@@ -7,7 +7,7 @@
 
 ## Executive Summary
 
-The literature strongly supports FireSpec's two-pronged approach (MESMA burn severity + LFMC estimation). Quintano et al. (2023) demonstrated PRISMA MESMA-based fire severity retrieval (R²=0.64–0.79, RMSE=0.33–0.41) dramatically outperforms Sentinel-2 (R²=0.27–0.53, RMSE=0.54–0.60). PRISMA operates at 240 bands with 12nm spacing — strictly inferior to Tanager-1's 426 bands at ~5nm spacing. LFMC estimation achieves R²=0.82–0.94 at leaf level via PLSR. No published work applies either method to Tanager data. This represents a wide-open research field, and FireSpec is positioned to produce the first peer-quality results using the highest-resolution spaceborne hyperspectral sensor currently available.
+The literature strongly supports FireSpec's two-pronged approach (MESMA burn severity + LFMC estimation). Quintano et al. (2023) unmixed both PRISMA and Sentinel-2 with MESMA and regressed the fractions against field CBI with Random Forest. PRISMA reached R²=0.64–0.79 (RMSE=0.33–0.41) and Sentinel-2 R²=0.27–0.53 (RMSE=0.54–0.60). PRISMA operates at 240 bands with 12nm spacing — strictly inferior to Tanager-1's 426 bands at ~5nm spacing. LFMC estimation achieves R²=0.82–0.94 at leaf level via PLSR. No published work applies either method to Tanager data. This represents a wide-open research field, and FireSpec is positioned to produce the first peer-quality results using the highest-resolution spaceborne hyperspectral sensor currently available.
 
 ---
 
@@ -15,9 +15,11 @@ The literature strongly supports FireSpec's two-pronged approach (MESMA burn sev
 
 ### Key Paper: Quintano et al. (2023)
 
-**Full citation:** Quintano, C., Fernández-Manso, A., & Roberts, D.A. (2023). First evaluation of fire severity retrieval from PRISMA hyperspectral data. *Remote Sensing of Environment*, 282, 113670.
+**Full citation:** Quintano, C., Calvo, L., Fernández-Manso, A., Suárez-Seoane, S., Fernandes, P.M., & Fernández-Guisuraga, J.M. (2023). First evaluation of fire severity retrieval from PRISMA hyperspectral data. *Remote Sensing of Environment*, 295, 113670. https://doi.org/10.1016/j.rse.2023.113670
 
-This paper is the most directly relevant work in the literature for FireSpec. It applied Multiple Endmember Spectral Mixture Analysis (MESMA) to post-fire imagery from the PRISMA spaceborne hyperspectral sensor and Sentinel-2 multispectral data over the Sierra de la Culebra megafire (28,046 ha, Spain, June 2022). It is the first evaluation of fire severity from a spaceborne imaging spectrometer, making it the direct methodological predecessor to FireSpec.
+This paper is the most directly relevant work in the literature for FireSpec. It applied Multiple Endmember Spectral Mixture Analysis (MESMA) to post-fire PRISMA (Level 2D) and Sentinel-2 (Level 2A) scenes of "one of the largest wildfires ever recorded in the western Mediterranean Basin" (abstract; the fire is not named there). It is the first evaluation of fire severity from a spaceborne imaging spectrometer, making it the direct methodological predecessor to FireSpec.
+
+Only the abstract has been checked; the full text could not be retrieved. Everything below is limited to what the abstract states.
 
 **Sensor characteristics:**
 - PRISMA: 240 contiguous bands, 400–2500 nm, ~12nm spacing, 30m GSD
@@ -25,25 +27,18 @@ This paper is the most directly relevant work in the literature for FireSpec. It
 
 **MESMA configuration:**
 - Three endmember classes: Char, Photosynthetic Vegetation (PV), Non-Photosynthetic Vegetation and Soil (NPVS)
-- Endmembers sourced from image-derived spectra supplemented with USGS spectral library reference spectra
+- The same three fractions were retrieved from both sensors. Sentinel-2 was also unmixed with MESMA; it was not an index-based benchmark.
 
-**Quantitative results — burn severity (Composite Burn Index, CBI):**
+**Quantitative results — burn severity (field Composite Burn Index, CBI):**
 
-| Metric | PRISMA (MESMA) | Sentinel-2 (spectral indices) |
+The fractions were regressed against field CBI at the vegetation, soil and site levels with Random Forest regression. The R² is therefore that of an RFR model on MESMA fractions, not of a fraction alone.
+
+| Metric (range over vegetation, soil and site CBI) | PRISMA (MESMA + RFR) | Sentinel-2 (MESMA + RFR) |
 |--------|---------------|-------------------------------|
-| R² (site-level) | 0.79 | 0.46 |
-| RMSE | 0.33 | 0.54 |
-| nRMSE | 12% | 20% |
-| R² (plot-level) | 0.64 | 0.27 |
+| R² | 0.64–0.79 | 0.27–0.53 |
+| RMSE | 0.33–0.41 | 0.54–0.60 |
 
-**Classification accuracy:**
-
-| Metric | PRISMA | Sentinel-2 |
-|--------|--------|------------|
-| Overall Accuracy | 83% | 57% |
-| Kappa coefficient | 0.73 | 0.33 |
-
-**Variable importance:** Char fraction was the most important predictor (60–63% increase in MSE when permuted), confirming that hyperspectral unmixing of char abundance is the correct modeling target.
+The abstract does not give per-level values, nRMSE, endmember sources or variable importance. Earlier versions of this note quoted per-level R², nRMSE, overall accuracy (83% vs 57%), kappa (0.73 vs 0.33) and char permutation importance (60–63%); those could not be traced to the paper and have been removed. Categorical severity (low/moderate/high) was classified with Ordinal Forests, which the abstract describes only qualitatively: PRISMA had consistent per-class user's and producer's accuracy.
 
 **Implication for FireSpec:** PRISMA has 240 bands at ~12nm. Tanager has 426 bands at ~5nm — a factor of ~2.4 more spectral information. We should expect equal or better performance from the same MESMA methodology applied to Tanager data.
 
@@ -222,7 +217,7 @@ The following band regions must be masked prior to all analyses due to atmospher
 
 ## References
 
-1. Quintano, C., Fernández-Manso, A., & Roberts, D.A. (2023). First evaluation of fire severity retrieval from PRISMA hyperspectral data. *Remote Sensing of Environment*, 282, 113670. https://doi.org/10.1016/j.rse.2022.113670
+1. Quintano, C., Calvo, L., Fernández-Manso, A., Suárez-Seoane, S., Fernandes, P.M., & Fernández-Guisuraga, J.M. (2023). First evaluation of fire severity retrieval from PRISMA hyperspectral data. *Remote Sensing of Environment*, 295, 113670. https://doi.org/10.1016/j.rse.2023.113670
 
 2. Veraverbeke, S., Dennison, P., Gitas, I., Hulley, G., Kalashnikova, O., Landau, T., ... & Stavros, N. (2018). Hyperspectral remote sensing of fire: State-of-the-art and future perspectives. *Remote Sensing of Environment*, 216, 694–720. https://doi.org/10.1016/j.rse.2018.07.016
 
