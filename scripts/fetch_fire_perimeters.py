@@ -42,6 +42,13 @@ WANTED = [
     ("KENNETH", "2025-01-09", 999, "Kenneth"),
 ]
 
+# The Hughes Fire burned ~50 km north of the Palisades swath, under the other
+# 2025-01-23 swath. It is kept in its own file so it can never enter the
+# Palisades inside/outside masks, which treat every fire in la_fires_2025 as
+# burned reference area.
+HUGHES_OUT = pathlib.Path("data/reference/perimeters/hughes_2025.geojson")
+HUGHES_WANTED = [("Hughes", "2025-01-22", 10425, "Hughes")]
+
 ACRE_TOLERANCE = 0.02
 
 
@@ -61,11 +68,11 @@ def fetch(name: str) -> dict:
         return json.load(response)
 
 
-def main() -> None:
-    OUT.parent.mkdir(parents=True, exist_ok=True)
+def write_perimeters(wanted: list, out: pathlib.Path) -> None:
+    out.parent.mkdir(parents=True, exist_ok=True)
     features = []
 
-    for name, want_date, want_acres, display in WANTED:
+    for name, want_date, want_acres, display in wanted:
         collection = fetch(name)
         match = None
         for feature in collection.get("features", []):
@@ -99,12 +106,17 @@ def main() -> None:
         print(f"  {display:10s} {want_date}  {acres:>9,.0f} acres  "
               f"{match['geometry']['type']}")
 
-    OUT.write_text(json.dumps({
+    out.write_text(json.dumps({
         "type": "FeatureCollection",
         "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
         "features": features,
     }))
-    print(f"\nWrote {OUT} ({OUT.stat().st_size / 1000:.0f} kB)")
+    print(f"\nWrote {out} ({out.stat().st_size / 1000:.0f} kB)")
+
+
+def main() -> None:
+    write_perimeters(WANTED, OUT)
+    write_perimeters(HUGHES_WANTED, HUGHES_OUT)
 
 
 if __name__ == "__main__":
