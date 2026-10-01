@@ -237,6 +237,8 @@ def main() -> int:
     parser.add_argument("--scene", type=Path, default=PALISADES_SCENE)
     parser.add_argument("--out", type=Path, default=OUTPUTS / "sensor_comparison_usgs.md")
     parser.add_argument("--skip-full", action="store_true", help="crop blocks only")
+    parser.add_argument("--endmember-free-only", action="store_true",
+                        help="write only the section 0 CSV; leave the report untouched")
     args = parser.parse_args()
 
     specs = sensor_specs()
@@ -261,6 +263,10 @@ def main() -> int:
     free = endmember_free_table(crop, specs)
     free_wide = free.pivot(index="product", columns="sensor", values="r2")[["EMIT", "PRISMA", "Sentinel-2"]]
     free_means = free.groupby(["demand", "sensor"])["r2"].mean().unstack()[["EMIT", "PRISMA", "Sentinel-2"]]
+    free.to_csv(OUTPUTS / "sensor_comparison_usgs_endmember_free.csv", index=False)
+    if args.endmember_free_only:
+        print(free_wide.to_string(float_format=lambda v: f"{v:.3f}"))
+        return 0
 
     # 1. Control: notebook 05 exactly, on its own crop.
     image_lib = notebook05_image_library(crop)
