@@ -159,7 +159,8 @@ def fig_hero_severity() -> None:
     sb.headline(
         ax, "Where the fire burned hottest",
         "Measured by Planet's Tanager-1 hyperspectral satellite. Inside the\n"
-        "official fire perimeter the median dNBR is 0.588; outside it, 0.046.",
+        "official fire perimeter the median dNBR is 0.588; outside every\n"
+        "mapped fire perimeter, 0.060.",
         title_size=22, width=0.50,
     )
 
@@ -181,7 +182,7 @@ def fig_hero_severity() -> None:
         ],
         loc="upper left", frameon=True, facecolor="#07070fe6",
         edgecolor="#2e2e4a", fontsize=10, labelcolor=sb.TEXT_COLOR,
-        bbox_to_anchor=(0.018, 0.775),  # just under the headline plate
+        bbox_to_anchor=(0.018, 0.735),  # just under the headline plate
     )
 
     sb.credit(ax, basemap=True, dins=True)

@@ -171,8 +171,8 @@ def load_perimeters() -> "object":
     Fetched by ``scripts/fetch_fire_perimeters.py``. These are the independent
     reference that confirms what each product is showing: char fraction
     averages 0.490 inside the Franklin perimeter against 0.047 outside, and
-    dNBR runs at median 0.588 inside the Palisades perimeter against 0.046
-    outside.
+    dNBR runs at median 0.588 inside the Palisades perimeter against 0.060
+    on land outside every perimeter.
     """
     import geopandas as gpd
 
